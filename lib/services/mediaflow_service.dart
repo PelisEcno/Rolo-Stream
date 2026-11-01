@@ -1,0 +1,63 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+
+/// Puente al proxy MediaFlow nativo (Android/iOS).
+///
+/// El lado nativo debe atender el canal [channelName] con los métodos
+/// `startProxy` (devuelve el puerto como int) y `stopProxy`.
+class MediaFlowService {
+  static const channelName = 'com.rolostream/mediaflow';
+  static const MethodChannel _channel = MethodChannel(channelName);
+
+  /// Puerto que se usa si el proxy nativo no arranca o no informa el suyo.
+  static const defaultPort = 8888;
+
+  static int _port = defaultPort;
+  static bool _nativeRunning = false;
+
+  /// Puerto en el que se espera al proxy.
+  static int get port => _port;
+
+  /// true solo si el proxy nativo respondió a `startProxy`.
+  static bool get nativeRunning => _nativeRunning;
+
+  /// URL base del proxy, p. ej. http://127.0.0.1:8888
+  static String get proxyUrl => 'http://127.0.0.1:$_port';
+
+  /// Inicia el proxy nativo y devuelve el puerto en el que escucha.
+  /// Si falla, devuelve [defaultPort] (por si el proxy corre por fuera de la app).
+  static Future<int> start() async {
+    try {
+      final int? port = await _channel
+          .invokeMethod<int>('startProxy')
+          .timeout(const Duration(seconds: 5));
+      _port = port ?? defaultPort;
+      _nativeRunning = port != null;
+    } catch (e) {
+      debugPrint('MediaFlow no arrancó ($e). Se usa el puerto $defaultPort.');
+      _port = defaultPort;
+      _nativeRunning = false;
+    }
+    return _port;
+  }
+
+  /// Detiene el proxy nativo.
+  static Future<void> stop() async {
+    try {
+      await _channel.invokeMethod('stopProxy');
+    } catch (e) {
+      debugPrint('Error al detener MediaFlow: $e');
+    } finally {
+      _nativeRunning = false;
+    }
+  }
+
+  /// URL del extractor para [host] y el embed [embedUrl].
+  /// `d` se codifica porque la URL del embed trae sus propios `?` y `&`.
+  static String buildUrl(String host, String embedUrl) {
+    return Uri.parse(proxyUrl).replace(
+      path: '/extractor/video',
+      queryParameters: {'host': host, 'd': embedUrl},
+    ).toString();
+  }
+}

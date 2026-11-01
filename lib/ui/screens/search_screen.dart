@@ -1,8 +1,8 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
-import '../../core/plugin_runtime.dart';
-import '../../models/anime_result.dart';
+import 'package:latanime_plugin/latanime_plugin.dart';
+import '../theme/app_theme.dart';
+import '../widgets/anime_card.dart';
+import 'detail_screen.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -13,90 +13,106 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _controller = TextEditingController();
-  PluginRuntime? _runtime;
+  final LatanimePlugin _plugin = LatanimePlugin();
+
   List<AnimeResult> _results = [];
   bool _loading = false;
+  bool _searched = false;
   String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPlugin();
-  }
-
-  Future<void> _loadPlugin() async {
-    final code = await rootBundle.loadString('assets/plugins/latanime.js');
-    setState(() {
-      _runtime = PluginRuntime(code);
-    });
-  }
 
   Future<void> _search() async {
     final q = _controller.text.trim();
-    if (q.length < 3 || _runtime == null) return;
-
+    if (q.length < 3) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('Escribe al menos 3 letras')));
+      return;
+    }
+    FocusScope.of(context).unfocus();
     setState(() {
       _loading = true;
       _error = null;
       _results = [];
     });
-
     try {
-      final results = await _runtime!.search(q);
-      setState(() => _results = results);
+      final results = await _plugin.search(q);
+      if (!mounted) return;
+      setState(() {
+        _results = results;
+        _searched = true;
+      });
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (mounted) setState(() => _error = e.toString());
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Widget _body() {
+    if (_loading) return const GridSkeleton();
+    if (_error != null) {
+      return ErrorState(title: 'No se pudo buscar', detail: _error, onRetry: _search);
+    }
+    if (!_searched) {
+      return const EmptyState(
+        icon: Icons.travel_explore_rounded,
+        title: 'Encuentra tu próximo anime',
+        subtitle: 'Busca por título para empezar a ver.',
+      );
+    }
+    if (_results.isEmpty) {
+      return const EmptyState(
+        icon: Icons.sentiment_dissatisfied_rounded,
+        title: 'Sin resultados',
+        subtitle: 'Prueba con otro título.',
+      );
+    }
+    return AnimeGrid(
+      count: _results.length,
+      builder: (i) {
+        final a = _results[i];
+        return AnimeCard(
+          nombre: a.nombre,
+          imagen: a.imagen,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) => DetailScreen(nombre: a.nombre, url: a.url, imagen: a.imagen)),
+          ),
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('RoloStream - Latanime')),
+      appBar: AppBar(title: const Text('Buscar')),
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
             child: TextField(
               controller: _controller,
+              textInputAction: TextInputAction.search,
               decoration: InputDecoration(
-                hintText: 'Buscar anime (mín. 3 letras)',
+                hintText: 'Buscar',
+                prefixIcon: const Icon(Icons.search_rounded, color: AppColors.textMuted),
                 suffixIcon: IconButton(
-                  icon: const Icon(Icons.search),
-                  onPressed: _search,
+                  icon: const Icon(Icons.close_rounded, color: AppColors.textMuted),
+                  onPressed: () => _controller.clear(),
                 ),
               ),
               onSubmitted: (_) => _search(),
             ),
           ),
-          if (_loading) const CircularProgressIndicator(),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.all(8),
-              child: Text('Error: $_error', style: const TextStyle(color: Colors.red)),
-            ),
-          Expanded(
-            child: _results.isEmpty && !_loading
-                ? const Center(child: Text('Escribe y busca'))
-                : ListView.builder(
-                    itemCount: _results.length,
-                    itemBuilder: (context, i) {
-                      final a = _results[i];
-                      return ListTile(
-                        leading: a.imagen.isNotEmpty
-                            ? Image.network(a.imagen, width: 50, height: 70, fit: BoxFit.cover)
-                            : const Icon(Icons.image),
-                        title: Text(a.nombre),
-                        subtitle: Text('${a.estado} · ${a.categoria}'),
-                        onTap: () {
-                          // TODO: ir a detalle del anime
-                        },
-                      );
-                    },
-                  ),
-          ),
+          Expanded(child: _body()),
         ],
       ),
     );

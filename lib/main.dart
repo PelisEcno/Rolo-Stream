@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
+import 'services/favorites_service.dart';
 import 'services/http_client.dart';
-import 'ui/screens/search_screen.dart';
+import 'services/mediaflow_service.dart';
+import 'ui/screens/home_shell.dart';
+import 'ui/theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   await HttpClientService.instance.init();
+  await MediaFlowService.start();
+  await FavoritesService.instance.load();
   runApp(const RoloStreamApp());
 }
 
@@ -15,8 +22,9 @@ class RoloStreamApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'RoloStream',
-      theme: ThemeData.dark(useMaterial3: true),
-      home: const SearchScreen(),
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.dark,
+      home: const HomeShell(),
     );
   }
 }

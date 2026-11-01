@@ -1,30 +1,73 @@
 workflows:
-  ios-release:
-    name: RoloStream iOS Release
+  ios-workflow:
+    name: iOS Build (IPA sin firmar)
+    instance_type: mac_mini_m1
     max_build_duration: 60
-    instance_type: mac_mini_m2
     environment:
       flutter: stable
       xcode: latest
       cocoapods: default
-    cache:
-      cache_paths:
-        - $FLUTTER_ROOT/.pub-cache
-        - $HOME/Library/Caches/CocoaPods
+
     scripts:
-      - name: Set up local.properties
+      # 🧹 1. LIMPIEZA
+      - name: Limpieza profunda
         script: |
-          echo "flutter.sdk=$HOME/programs/flutter" > "$CM_BUILD_DIR/android/local.properties"
-      - name: Get Flutter packages
+          rm -rf ~/Library/Developer/Xcode/DerivedData
+          rm -rf ios/Pods
+          rm -rf ios/Podfile.lock
+          pod cache clean --all
+
+      # 🔥 2. FIREBASE (opcional)
+      - name: Firebase config (iOS)
+        script: |
+          if [ -n "$GSI_PLIST_B64" ]; then
+            echo "$GSI_PLIST_B64" | base64 --decode > ios/Runner/GoogleService-Info.plist
+            echo "✅ GoogleService-Info.plist configurado"
+          fi
+
+      - name: Flutter Pub Get
         script: |
           flutter pub get
-      - name: Install pods
+
+      # 📝 3. REGISTRAR EL SWIFT
+      - name: Registrar MediaFlowBridge.swift en Xcode
         script: |
-          find . -name "Podfile" -execdir pod install \;
-      - name: Build iOS (Release)
+          cd ios
+          gem install xcodeproj --no-document
+          ruby <<'RUBY'
+          require 'xcodeproj'
+          project_path = 'Runner.xcodeproj'
+          project = Xcodeproj::Project.open(project_path)
+          target = project.targets.find { |t| t.name == 'Runner' }
+          runner_group = project.main_group.find_subpath('Runner', true)
+          existing = runner_group.files.find { |f| f.path == 'MediaFlowBridge.swift' }
+          unless existing
+            file_ref = runner_group.new_file('MediaFlowBridge.swift')
+            target.add_file_references([file_ref])
+            project.save
+            puts "✅ MediaFlowBridge.swift añadido al proyecto"
+          else
+            puts "✅ MediaFlowBridge.swift ya estaba registrado"
+          end
+          RUBY
+
+      # 📦 4. INSTALAR PODS (Enlazará el xcframework local)
+      - name: CocoaPods Install
         script: |
-          flutter build ipa --release \
-            --export-options-plist=/Users/builder/export_options.plist
+          cd ios
+          pod install --repo-update
+
+      # 🏗️ 5. COMPILAR Y CREAR IPA
+      - name: Build iOS (sin firma)
+        script: |
+          flutter build ios --release --no-codesign
+
+      - name: Crear IPA
+        script: |
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qr RoloStream.ipa Payload
+          echo "✅ IPA creada correctamente"
+          
     artifacts:
-      - build/ios/ipa/*.ipa
-      - /tmp/xcodebuild_logs/*.log
+      - RoloStream.ipa
