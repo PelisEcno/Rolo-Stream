@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
     
-  olostream_core:
+  rolostream_core:
     git:
       url: https://github.com/PelisEcno/rolostream_core
       ref: main
