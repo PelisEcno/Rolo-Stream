@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'dart:io';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:latanime_plugin/latanime_plugin.dart';
 import 'package:media_kit/media_kit.dart';
@@ -7,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../services/mediaflow_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/anime_card.dart';
+import '../widgets/debug_console.dart';
 
 class PlayerScreen extends StatefulWidget {
   final String slug;
@@ -32,17 +35,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String? _error;
   String? _playError;
 
+  final _log = DebugLog();
+  bool _showConsole = false;
+
   @override
   void initState() {
     super.initState();
     _player.stream.error.listen((e) {
-      if (mounted && e.isNotEmpty) setState(() => _playError = e);
+      if (e.isEmpty) return;
+      _log.add('[PLAYER] ${DebugLog.short(e, 300)}');
+      if (mounted) setState(() => _playError = e);
     });
     _load();
   }
 
   @override
   void dispose() {
+    _log.dispose();
     _player.dispose();
     super.dispose();
   }
@@ -75,11 +84,65 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  /// URL del proxy MediaFlow (/extractor/video?host=...&d=...) para el servidor;
-  /// si el proxy no responde, la URL directa.
-  Future<String> _getProxiedUrl(VideoServer server) async {
-    if (!await _proxyIsRunning()) return server.url;
-    return MediaFlowService.buildUrl(server.nombre, server.url);
+  /// Obtiene la URL real del video y los headers que el servidor exige
+  /// (Referer, User-Agent) a través del proxy.
+  /// Si el proxy no responde o falla, devuelve la URL directa sin headers.
+  Future<({String url, Map<String, String>? headers})> _getProxiedUrl(
+      VideoServer server) async {
+    final direct = (url: server.url, headers: null as Map<String, String>?);
+    if (!await _proxyIsRunning()) {
+      _log.add('[WARN] Proxy no responde en :${MediaFlowService.port}, uso URL directa');
+      return direct;
+    }
+
+    final proxyUrl = MediaFlowService.buildUrl(server.nombre, server.url);
+    _log.add('[REQUEST] GET host=${server.nombre}');
+    // No dejamos la contraseña en el log.
+    _log.add('  ${DebugLog.short(proxyUrl.replaceAll(MediaFlowService.apiPassword, '***'))}');
+
+    // El endpoint devuelve un JSON con el destination_url; no es el video.
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 30),
+      responseType: ResponseType.plain,
+    ));
+    try {
+      final response = await dio.get<String>(proxyUrl);
+      final body = response.data ?? '';
+      final data = jsonDecode(body);
+      final destUrl = data is Map ? data['destination_url'] : null;
+      if (destUrl is String && destUrl.isNotEmpty) {
+        _log.add('[SUCCESS] destination_url: ${DebugLog.short(destUrl)}');
+        final headers = _extractHeaders((data as Map)['request_headers']);
+        if (headers != null) {
+          _log.add('[HEADERS] ${DebugLog.short(headers.entries.map((e) => '${e.key}: ${e.value}').join(' | '), 200)}');
+        }
+        return (url: destUrl, headers: headers);
+      }
+      _log.add('[ERROR] ${server.nombre}: sin destination_url (HTTP ${response.statusCode}) '
+          '${DebugLog.short(body, 200)}');
+    } on DioException catch (e) {
+      final body = e.response?.data?.toString() ?? '';
+      _log.add('[ERROR] ${server.nombre}: HTTP ${e.response?.statusCode ?? '-'} '
+          '${DebugLog.short(body.isNotEmpty ? body : (e.message ?? e.type.name), 200)}');
+    } catch (e) {
+      _log.add('[ERROR] ${server.nombre}: ${DebugLog.short(e.toString(), 200)}');
+    } finally {
+      dio.close();
+    }
+    _log.add('[WARN] Fallback a URL directa');
+    return direct;
+  }
+
+  /// Toma Referer y User-Agent de `request_headers` (sin distinguir mayúsculas).
+  Map<String, String>? _extractHeaders(Object? raw) {
+    if (raw is! Map) return null;
+    final lower = {for (final e in raw.entries) e.key.toString().toLowerCase(): e.value};
+    final headers = <String, String>{
+      if (lower['referer'] != null) 'Referer': lower['referer'].toString(),
+      if (lower['user-agent'] != null) 'User-Agent': lower['user-agent'].toString(),
+    };
+    return headers.isEmpty ? null : headers;
   }
 
   Future<void> _select(int i) async {
@@ -89,10 +152,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _playError = null;
     });
     try {
-      final url = await _getProxiedUrl(_servers[i]);
+      final video = await _getProxiedUrl(_servers[i]);
       if (!mounted || _selected != i) return;
-      await _player.open(Media(url));
+
+      _log.add('[PLAY] media_kit open: ${DebugLog.short(video.url)}');
+      await _player.open(Media(video.url, httpHeaders: video.headers));
     } catch (e) {
+      _log.add('[PLAYER] ${DebugLog.short(e.toString(), 300)}');
       if (mounted && _selected == i) setState(() => _playError = e.toString());
     } finally {
       if (mounted && _selected == i) setState(() => _opening = false);
@@ -205,6 +271,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Consola de depuración',
+            icon: Icon(Icons.bug_report_outlined,
+                color: _showConsole ? AppColors.primary : null),
+            onPressed: () => setState(() => _showConsole = !_showConsole),
+          ),
           if (_servers.isNotEmpty)
             IconButton(
               tooltip: 'Abrir en navegador',
@@ -214,7 +286,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
         ],
       ),
-      body: _body(),
+      body: Stack(
+        children: [
+          _body(),
+          if (_showConsole)
+            DebugConsole(log: _log, onClose: () => setState(() => _showConsole = false)),
+        ],
+      ),
     );
   }
 }

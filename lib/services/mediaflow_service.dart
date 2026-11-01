@@ -12,6 +12,10 @@ class MediaFlowService {
   /// Puerto que se usa si el proxy nativo no arranca o no informa el suyo.
   static const defaultPort = 8888;
 
+  /// Debe coincidir con APP__AUTH__API_PASSWORD del proxy
+  /// (ProxyManager.kt en Android, MediaFlowBridge.swift en iOS).
+  static const apiPassword = 'changeme';
+
   static int _port = defaultPort;
   static bool _nativeRunning = false;
 
@@ -52,12 +56,16 @@ class MediaFlowService {
     }
   }
 
-  /// URL del extractor para [host] y el embed [embedUrl].
+  /// URL del extractor para [host] y el embed [embedUrl], con `api_password`.
   /// `d` se codifica porque la URL del embed trae sus propios `?` y `&`.
   static String buildUrl(String host, String embedUrl) {
     return Uri.parse(proxyUrl).replace(
       path: '/extractor/video',
-      queryParameters: {'host': host, 'd': embedUrl},
+      queryParameters: {
+        'host': host,
+        'd': embedUrl,
+        'api_password': apiPassword,
+      },
     ).toString();
   }
 }
