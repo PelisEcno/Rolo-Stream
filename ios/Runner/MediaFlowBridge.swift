@@ -66,9 +66,15 @@ class MediaFlowBridge {
 
     /// Arranca el proxy en background.
     func start() {
-        guard serverPtr == nil else {
-            NSLog("[MediaFlow] Ya estaba corriendo")
-            return
+        if let existing = serverPtr {
+            if mediaflow_server_is_running(existing) {
+                NSLog("[MediaFlow] Ya estaba corriendo")
+                return
+            }
+            // iOS lo detuvo en segundo plano: liberamos el handle y lo recreamos.
+            NSLog("[MediaFlow] Estaba detenido, reiniciando")
+            mediaflow_server_destroy(existing)
+            serverPtr = nil
         }
 
         // MARK: - Variables de entorno (deben coincidir con el Rust)

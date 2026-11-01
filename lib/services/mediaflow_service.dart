@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -43,6 +44,39 @@ class MediaFlowService {
       _nativeRunning = false;
     }
     return _port;
+  }
+
+  static Future<bool>? _ensuring;
+
+  /// true si algo escucha en el puerto del proxy.
+  static Future<bool> isRunning() async {
+    try {
+      final sock = await Socket.connect('127.0.0.1', _port,
+          timeout: const Duration(milliseconds: 600));
+      sock.destroy();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Comprueba que el proxy responda y, si no, lo reinicia.
+  /// Útil al volver de segundo plano, donde el sistema suele matarlo.
+  /// Varias llamadas simultáneas comparten el mismo intento.
+  static Future<bool> ensureRunning() => _ensuring ??= _ensureRunning().whenComplete(() {
+        _ensuring = null;
+      });
+
+  static Future<bool> _ensureRunning() async {
+    if (await isRunning()) return true;
+    debugPrint('MediaFlow no responde, reiniciando…');
+    await start();
+    // En Android el arranque es asíncrono: esperamos a que abra el puerto.
+    for (var i = 0; i < 10; i++) {
+      if (await isRunning()) return true;
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
+    return false;
   }
 
   /// Detiene el proxy nativo.

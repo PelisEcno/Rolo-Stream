@@ -1,5 +1,5 @@
+import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:latanime_plugin/latanime_plugin.dart';
@@ -35,22 +35,55 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String? _error;
   String? _playError;
 
+  Timer? _errorTimer;
+  Duration? _errorShownAt;
+
   final _log = DebugLog();
   bool _showConsole = false;
 
   @override
   void initState() {
     super.initState();
-    _player.stream.error.listen((e) {
-      if (e.isEmpty) return;
-      _log.add('[PLAYER] ${DebugLog.short(e, 300)}');
-      if (mounted) setState(() => _playError = e);
+    _player.stream.error.listen(_onPlayerError);
+    // Si el video avanza después de un error, el error era transitorio: quitamos el aviso.
+    _player.stream.position.listen((pos) {
+      final at = _errorShownAt;
+      if (_playError != null &&
+          at != null &&
+          _player.state.playing &&
+          pos - at > const Duration(seconds: 1)) {
+        _errorShownAt = null;
+        if (mounted) setState(() => _playError = null);
+      }
     });
     _load();
   }
 
+  /// Con errores transitorios (un segmento que falla y se reintenta) el video
+  /// sigue sonando: esperamos un momento y solo avisamos si dejó de avanzar.
+  void _onPlayerError(String e) {
+    if (e.isEmpty) return;
+    _log.add('[PLAYER] ${DebugLog.short(e, 300)}');
+    final posAtError = _player.state.position;
+    _errorTimer?.cancel();
+    _errorTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      final advanced = _player.state.playing &&
+          _player.state.position - posAtError > const Duration(milliseconds: 500);
+      if (advanced) {
+        _log.add('[WARN] Error transitorio, la reproducción continúa');
+        return;
+      }
+      setState(() {
+        _playError = e;
+        _errorShownAt = _player.state.position;
+      });
+    });
+  }
+
   @override
   void dispose() {
+    _errorTimer?.cancel();
     _log.dispose();
     _player.dispose();
     super.dispose();
@@ -73,15 +106,39 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  Future<bool> _proxyIsRunning() async {
-    try {
-      final sock = await Socket.connect('127.0.0.1', MediaFlowService.port,
-          timeout: const Duration(milliseconds: 600));
-      sock.destroy();
-      return true;
-    } catch (_) {
-      return false;
+  /// El proxy no reconoce algunos alias de los servidores.
+  String _mapServerNameToProxyHost(String serverName) {
+    final name = serverName.trim().toLowerCase();
+    switch (name) {
+      case 'dsvplay':
+      case 'playmogo':
+        return 'doodstream';
+      case 'lulu':
+        return 'lulustream';
+      default:
+        return name;
     }
+  }
+
+  /// Mensaje corto para el usuario; el error crudo queda en la consola de depuración.
+  String _friendlyPlayerError(String raw) {
+    final e = raw.toLowerCase();
+    if (e.contains('tcp') ||
+        e.contains('ffurl_read') ||
+        e.contains('connection') ||
+        e.contains('timed out') ||
+        e.contains('timeout') ||
+        e.contains('network') ||
+        e.contains('failed to open')) {
+      return 'Error de conexión con el servidor. Intenta con otro servidor.';
+    }
+    if (e.contains('403') || e.contains('401') || e.contains('forbidden')) {
+      return 'El servidor rechazó la conexión. Intenta con otro servidor.';
+    }
+    if (e.contains('format') || e.contains('codec') || e.contains('demuxer')) {
+      return 'Formato de video no compatible. Intenta con otro servidor.';
+    }
+    return 'No se pudo cargar el video. Intenta con otro servidor.';
   }
 
   /// Obtiene la URL real del video y los headers que el servidor exige
@@ -90,13 +147,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<({String url, Map<String, String>? headers})> _getProxiedUrl(
       VideoServer server) async {
     final direct = (url: server.url, headers: null as Map<String, String>?);
-    if (!await _proxyIsRunning()) {
+    if (!await MediaFlowService.ensureRunning()) {
       _log.add('[WARN] Proxy no responde en :${MediaFlowService.port}, uso URL directa');
       return direct;
     }
 
-    final proxyUrl = MediaFlowService.buildUrl(server.nombre, server.url);
-    _log.add('[REQUEST] GET host=${server.nombre}');
+    final host = _mapServerNameToProxyHost(server.nombre);
+    final proxyUrl = MediaFlowService.buildUrl(host, server.url);
+    _log.add('[REQUEST] GET host=$host'
+        '${host != server.nombre.trim().toLowerCase() ? ' (alias: ${server.nombre})' : ''}');
     // No dejamos la contraseña en el log.
     _log.add('  ${DebugLog.short(proxyUrl.replaceAll(MediaFlowService.apiPassword, '***'))}');
 
@@ -146,6 +205,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _select(int i) async {
+    _errorTimer?.cancel();
+    _errorShownAt = null;
     setState(() {
       _selected = i;
       _opening = true;
@@ -183,9 +244,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 children: [
                   const Icon(Icons.error_outline_rounded, color: AppColors.textMuted, size: 36),
                   const SizedBox(height: 8),
-                  const Text('No se pudo cargar el video. Intenta con otro servidor.',
+                  Text(_friendlyPlayerError(_playError!),
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontWeight: FontWeight.w600)),
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
                     onPressed: () => _select(_selected),

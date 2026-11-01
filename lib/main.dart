@@ -15,8 +15,31 @@ void main() async {
   runApp(const RoloStreamApp());
 }
 
-class RoloStreamApp extends StatelessWidget {
+class RoloStreamApp extends StatefulWidget {
   const RoloStreamApp({super.key});
+
+  @override
+  State<RoloStreamApp> createState() => _RoloStreamAppState();
+}
+
+class _RoloStreamAppState extends State<RoloStreamApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// El sistema puede apagar el proxy en segundo plano: al volver, lo verificamos.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) MediaFlowService.ensureRunning();
+  }
 
   @override
   Widget build(BuildContext context) {
