@@ -28,11 +28,3 @@ workflows:
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
-    publishing:
-      # Opcional: descomenta si quieres subir automáticamente a TestFlight
-      # email:
-      #   recipients:
-      #     - tu@email.com
-      #   notify:
-      #     success: true
-      #     failure: true
