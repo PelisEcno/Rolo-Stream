@@ -1,6 +1,6 @@
 workflows:
   ios-workflow:
-    name: iOS Build (IPA sin firmar)
+    name: RoloStream iOS Build
     instance_type: mac_mini_m1
     max_build_duration: 60
     environment:
@@ -9,15 +9,54 @@ workflows:
       cocoapods: default
 
     scripts:
-      # 🧹 1. LIMPIEZA
+      # 🧹 1. LIMPIEZA PROFUNDA
       - name: Limpieza profunda
         script: |
           rm -rf ~/Library/Developer/Xcode/DerivedData
           rm -rf ios/Pods
           rm -rf ios/Podfile.lock
+          rm -rf ios/MediaFlowProxyLight/MediaFlowProxyLight.xcframework
           pod cache clean --all
 
-      # 🔥 2. FIREBASE (opcional)
+      # 📦 2. DESCARGAR EL PROXY (v3.0.0)
+      - name: Descargar el Proxy (v3.0.0)
+        script: |
+          echo "Descargando xcframework desde la Release v3.0.0..."
+          
+          DIRECT_URL="https://github.com/PelisEcno/mediaflow-proxy-light/releases/download/v3.0.0/MediaFlowProxyLight.xcframework.zip"
+          
+          curl -L -o xcframework.zip "$DIRECT_URL"
+          
+          FILE_SIZE=$(stat -f%z xcframework.zip)
+          echo "Tamaño del archivo: $FILE_SIZE bytes"
+          
+          if [ "$FILE_SIZE" -lt 1000000 ]; then
+            echo "❌ El archivo es demasiado pequeño."
+            exit 1
+          fi
+          
+          echo "Descomprimiendo en carpeta temporal..."
+          mkdir -p tmp_extract
+          unzip -q xcframework.zip -d tmp_extract
+          
+          echo "Creando la estructura correcta del .xcframework..."
+          mkdir -p ios/MediaFlowProxyLight/MediaFlowProxyLight.xcframework
+          
+          # Movemos todo el contenido extraído a la nueva carpeta
+          mv tmp_extract/* ios/MediaFlowProxyLight/MediaFlowProxyLight.xcframework/
+          
+          # Verificamos que quedó bien armado
+          if [ -f "ios/MediaFlowProxyLight/MediaFlowProxyLight.xcframework/Info.plist" ] && [ -d "ios/MediaFlowProxyLight/MediaFlowProxyLight.xcframework/ios-arm64" ]; then
+            echo "✅ Estructura del .xcframework armada correctamente."
+          else
+            echo "❌ Algo falló al armar la estructura."
+            ls -la ios/MediaFlowProxyLight/MediaFlowProxyLight.xcframework/
+            exit 1
+          fi
+          
+          rm -rf tmp_extract xcframework.zip
+
+      # 🔥 3. FIREBASE (Opcional, bórralo si no usas Firebase)
       - name: Firebase config (iOS)
         script: |
           if [ -n "$GSI_PLIST_B64" ]; then
@@ -29,7 +68,7 @@ workflows:
         script: |
           flutter pub get
 
-      # 📝 3. REGISTRAR EL SWIFT
+      # 📝 4. REGISTRAR EL SWIFT EN XCODE
       - name: Registrar MediaFlowBridge.swift en Xcode
         script: |
           cd ios
@@ -51,13 +90,13 @@ workflows:
           end
           RUBY
 
-      # 📦 4. INSTALAR PODS (Enlazará el xcframework local)
+      # 📦 5. INSTALAR PODS
       - name: CocoaPods Install
         script: |
           cd ios
           pod install --repo-update
 
-      # 🏗️ 5. COMPILAR Y CREAR IPA
+      # 🏗️ 6. COMPILAR (SIN FIRMA, SIN export-options-plist)
       - name: Build iOS (sin firma)
         script: |
           flutter build ios --release --no-codesign
