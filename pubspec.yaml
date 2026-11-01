@@ -1,0 +1,46 @@
+name: rolostream
+description: RoloStream - Reproductor de anime multiplataforma
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # HTTP + cookies
+  dio: ^5.7.0
+  cookie_jar: ^4.0.8
+  dio_cookie_manager: ^3.1.1
+
+  # Parseo HTML
+  html: ^0.15.4
+
+  # Runtime de plugins JS
+  flutter_js: ^0.8.5
+
+  # UI
+  cached_network_image: ^3.4.1
+  webview_flutter: ^4.10.0
+  video_player: ^2.9.2
+  chewie: ^1.8.5
+
+  # Persistencia
+  shared_preferences: ^2.3.2
+  path_provider: ^2.1.4
+
+  # Utilidades
+  url_launcher: ^6.3.1
+  intl: ^0.19.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/plugins/
