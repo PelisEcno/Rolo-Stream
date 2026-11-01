@@ -23,6 +23,15 @@ class MediaFlowBridge {
             guard let self = self else { return }
 
             switch call.method {
+            case "startProxy":
+                self.start()
+                // Devolvemos el puerto en el que escucha (8888)
+                result(8888)
+
+            case "stopProxy":
+                self.stop()
+                result(nil)
+
             case "proxyStatus":
                 guard let ptr = self.serverPtr else {
                     result(false)
@@ -77,7 +86,6 @@ class MediaFlowBridge {
         setenv("APP__PROXY__POOL_MAX_IDLE_PER_HOST", "100", 1)
 
         // MARK: - Strings estáticos (NO necesitan free)
-        // Usamos literales C directamente. El Rust NO debe liberarlos.
         let host: UnsafeMutablePointer<CChar>? = UnsafeMutablePointer(mutating: ("127.0.0.1" as NSString).utf8String)
         let password: UnsafeMutablePointer<CChar>? = UnsafeMutablePointer(mutating: ("changeme" as NSString).utf8String)
 
@@ -104,7 +112,6 @@ class MediaFlowBridge {
             self.serverPtr = serverPtr
             let port = mediaflow_server_port(serverPtr)
             NSLog("[MediaFlow] ✅ Server arrancado en 127.0.0.1:\(port)")
-            // NO mostrar alert aquí — bloquea la UX
         } else {
             NSLog("[MediaFlow] ❌ Error arrancando server: \(status.rawValue)")
             mediaflow_server_destroy(serverPtr)
@@ -146,7 +153,6 @@ class MediaFlowBridge {
 
     /// Test genérico de extracción (no hardcodeado).
     private func testExtraction(completion: @escaping (Bool, String) -> Void) {
-        // Endpoint /health para verificar que el proxy responde
         let urlString = "http://127.0.0.1:8888/health"
 
         guard let url = URL(string: urlString) else {

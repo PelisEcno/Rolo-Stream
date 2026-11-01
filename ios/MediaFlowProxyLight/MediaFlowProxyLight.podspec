@@ -6,7 +6,7 @@ Pod::Spec.new do |s|
   s.homepage         = 'https://github.com/PelisEcno/mediaflow-proxy-light'
   s.license          = { :type => 'MIT' }
   s.author           = { 'PelisEcno' => 'you@example.com' }
-  s.platform         = :ios, '13.0'
+  s.platform         = :ios, '15.0'
   s.source           = { :path => '.' }
   
   s.vendored_frameworks = 'MediaFlowProxyLight.xcframework'
