@@ -7,14 +7,24 @@ class FavoriteAnime {
   final String url;
   final String imagen;
 
-  const FavoriteAnime({required this.nombre, required this.url, required this.imagen});
+  /// Fuente de donde salió (id del plugin). Los favoritos antiguos eran de Latanime.
+  final String sourceId;
 
-  Map<String, dynamic> toJson() => {'nombre': nombre, 'url': url, 'imagen': imagen};
+  const FavoriteAnime({
+    required this.nombre,
+    required this.url,
+    required this.imagen,
+    this.sourceId = 'latanime',
+  });
+
+  Map<String, dynamic> toJson() =>
+      {'nombre': nombre, 'url': url, 'imagen': imagen, 'sourceId': sourceId};
 
   factory FavoriteAnime.fromJson(Map<String, dynamic> j) => FavoriteAnime(
         nombre: j['nombre'] ?? '',
         url: j['url'] ?? '',
         imagen: j['imagen'] ?? '',
+        sourceId: j['sourceId'] ?? 'latanime',
       );
 }
 

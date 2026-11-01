@@ -31,7 +31,7 @@ class FavoritesScreen extends StatelessWidget {
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(
-                      builder: (_) => DetailScreen(nombre: a.nombre, url: a.url, imagen: a.imagen)),
+                      builder: (_) => DetailScreen(sourceId: a.sourceId, nombre: a.nombre, url: a.url, imagen: a.imagen)),
                 ),
               );
             },

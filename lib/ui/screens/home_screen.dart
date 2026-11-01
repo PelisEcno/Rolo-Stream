@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:latanime_plugin/latanime_plugin.dart';
+import 'package:rolostream_core/rolostream_core.dart';
+import '../../services/source_registry.dart';
 import '../theme/app_theme.dart';
 import '../widgets/anime_card.dart';
+import '../widgets/source_picker.dart';
 import 'detail_screen.dart';
 import 'player_screen.dart';
 
@@ -13,7 +15,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final _plugin = LatanimePlugin();
+  final SourcePlugin _source = pluginRegistry.active;
 
   late Future<List<RecentSerie>> _seriesFuture;
   late Future<List<RecentEpisode>> _episodesFuture;
@@ -21,17 +23,17 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _seriesFuture = _plugin.getRecentSeries();
-    _episodesFuture = _plugin.getLatestEpisodes();
+    _seriesFuture = _source.getRecentSeries();
+    _episodesFuture = _source.getLatestEpisodes();
   }
 
-  void _reloadSeries() => setState(() => _seriesFuture = _plugin.getRecentSeries());
-  void _reloadEpisodes() => setState(() => _episodesFuture = _plugin.getLatestEpisodes());
+  void _reloadSeries() => setState(() => _seriesFuture = _source.getRecentSeries());
+  void _reloadEpisodes() => setState(() => _episodesFuture = _source.getLatestEpisodes());
 
   Future<void> _refresh() async {
     setState(() {
-      _seriesFuture = _plugin.getRecentSeries();
-      _episodesFuture = _plugin.getLatestEpisodes();
+      _seriesFuture = _source.getRecentSeries();
+      _episodesFuture = _source.getLatestEpisodes();
     });
     try {
       await Future.wait<Object?>([_seriesFuture, _episodesFuture]);
@@ -43,13 +45,12 @@ class _HomeScreenState extends State<HomeScreen> {
   void _openSerie(RecentSerie s) => Navigator.push(
         context,
         MaterialPageRoute(
-            builder: (_) => DetailScreen(nombre: s.titulo, url: s.url, imagen: s.imagen)),
+            builder: (_) => DetailScreen(sourceId: _source.id, nombre: s.titulo, url: s.url, imagen: s.imagen)),
       );
 
-  /// URL tipo https://latanime.org/ver/ranma-2024-latino-episodio-29
   void _openEpisode(RecentEpisode ep) {
-    final m = RegExp(r'^(.*)-episodio-(\d+)$').firstMatch(_lastSegment(ep.url));
-    if (m == null) {
+    final parsed = _source.parseEpisodeUrl(ep.url);
+    if (parsed == null) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('No se pudo abrir el episodio')));
       return;
@@ -58,7 +59,10 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
-            slug: m.group(1)!, numero: int.parse(m.group(2)!), animeTitulo: ep.titulo),
+            sourceId: _source.id,
+            slug: parsed.slug,
+            numero: parsed.numero,
+            animeTitulo: ep.titulo),
       ),
     );
   }
@@ -69,6 +73,7 @@ class _HomeScreenState extends State<HomeScreen> {
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
+        actions: const [SourceButton(), SizedBox(width: 4)],
         title: const Text.rich(
           TextSpan(children: [
             TextSpan(text: 'ROLO', style: TextStyle(color: AppColors.primary)),
@@ -86,7 +91,10 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             _HeroSection(future: _seriesFuture, onOpen: _openSerie, onRetry: _reloadSeries),
             _RecentEpisodesSection(
-                future: _episodesFuture, onOpen: _openEpisode, onRetry: _reloadEpisodes),
+                future: _episodesFuture,
+                source: _source,
+                onOpen: _openEpisode,
+                onRetry: _reloadEpisodes),
             _RecentSeriesSection(
                 future: _seriesFuture, onOpen: _openSerie, onRetry: _reloadSeries),
           ],
@@ -94,11 +102,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
-}
-
-String _lastSegment(String url) {
-  final segs = Uri.tryParse(url)?.pathSegments.where((s) => s.isNotEmpty).toList() ?? [];
-  return segs.isEmpty ? url : segs.last;
 }
 
 class _SectionTitle extends StatelessWidget {
@@ -202,10 +205,14 @@ class _HeroSection extends StatelessWidget {
 
 class _RecentEpisodesSection extends StatelessWidget {
   final Future<List<RecentEpisode>> future;
+  final SourcePlugin source;
   final void Function(RecentEpisode) onOpen;
   final VoidCallback onRetry;
   const _RecentEpisodesSection(
-      {required this.future, required this.onOpen, required this.onRetry});
+      {required this.future,
+      required this.source,
+      required this.onOpen,
+      required this.onRetry});
 
   static const _itemWidth = 208.0;
 
@@ -235,7 +242,11 @@ class _RecentEpisodesSection extends StatelessWidget {
           loading: !done,
           itemWidth: _itemWidth,
           height: 170,
-          builder: (i) => _EpisodeCard(ep: eps[i], onTap: () => onOpen(eps[i])),
+          builder: (i) => _EpisodeCard(
+            ep: eps[i],
+            numero: source.parseEpisodeUrl(eps[i].url)?.numero,
+            onTap: () => onOpen(eps[i]),
+          ),
         );
       },
     );
@@ -244,12 +255,12 @@ class _RecentEpisodesSection extends StatelessWidget {
 
 class _EpisodeCard extends StatelessWidget {
   final RecentEpisode ep;
+  final int? numero;
   final VoidCallback onTap;
-  const _EpisodeCard({required this.ep, required this.onTap});
+  const _EpisodeCard({required this.ep, required this.numero, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final num = RegExp(r'-episodio-(\d+)$').firstMatch(_lastSegment(ep.url))?.group(1);
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -293,8 +304,8 @@ class _EpisodeCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          if (num != null)
-            Text('E$num',
+          if (numero != null)
+            Text('E$numero',
                 style: const TextStyle(
                     color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w800)),
           Text(ep.titulo,

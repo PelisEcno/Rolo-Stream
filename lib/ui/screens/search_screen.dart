@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:latanime_plugin/latanime_plugin.dart';
+import 'package:rolostream_core/rolostream_core.dart';
+import '../../services/source_registry.dart';
 import '../theme/app_theme.dart';
 import '../widgets/anime_card.dart';
 import 'detail_screen.dart';
@@ -13,7 +14,7 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _controller = TextEditingController();
-  final LatanimePlugin _plugin = LatanimePlugin();
+  final SourcePlugin _source = pluginRegistry.active;
 
   List<AnimeResult> _results = [];
   bool _loading = false;
@@ -35,7 +36,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _results = [];
     });
     try {
-      final results = await _plugin.search(q);
+      final results = await _source.search(q);
       if (!mounted) return;
       setState(() {
         _results = results;
@@ -83,7 +84,7 @@ class _SearchScreenState extends State<SearchScreen> {
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(
-                builder: (_) => DetailScreen(nombre: a.nombre, url: a.url, imagen: a.imagen)),
+                builder: (_) => DetailScreen(sourceId: _source.id, nombre: a.nombre, url: a.url, imagen: a.imagen)),
           ),
         );
       },

@@ -1,48 +1,57 @@
 import 'package:flutter/material.dart';
-import 'package:latanime_plugin/latanime_plugin.dart';
+import 'package:rolostream_core/rolostream_core.dart';
 import '../../services/favorites_service.dart';
+import '../../services/source_registry.dart';
 import '../theme/app_theme.dart';
 import '../widgets/anime_card.dart';
 import 'player_screen.dart';
-
-/// Extrae el slug de la URL del anime (último segmento).
-String slugFromUrl(String url) {
-  final segs = Uri.tryParse(url)?.pathSegments.where((s) => s.isNotEmpty).toList() ?? [];
-  return segs.isEmpty ? url : segs.last;
-}
 
 class DetailScreen extends StatefulWidget {
   final String nombre;
   final String url;
   final String imagen;
 
-  const DetailScreen({super.key, required this.nombre, required this.url, required this.imagen});
+  /// Fuente de la que viene la serie; si es null se usa la activa.
+  final String? sourceId;
+
+  const DetailScreen({
+    super.key,
+    required this.nombre,
+    required this.url,
+    required this.imagen,
+    this.sourceId,
+  });
 
   @override
   State<DetailScreen> createState() => _DetailScreenState();
 }
 
 class _DetailScreenState extends State<DetailScreen> {
-  final _plugin = LatanimePlugin();
+  late final SourcePlugin _source =
+      pluginRegistry.byId(widget.sourceId ?? '') ?? pluginRegistry.active;
   late Future<AnimeDetail> _future;
   bool _descending = false;
   bool _expanded = false;
 
-  late final String _slug = slugFromUrl(widget.url);
+  late final String _slug = _source.slugFromUrl(widget.url);
 
   @override
   void initState() {
     super.initState();
-    _future = _plugin.getAnime(_slug);
+    _future = _source.getAnime(_slug);
   }
 
-  void _retry() => setState(() => _future = _plugin.getAnime(_slug));
+  void _retry() => setState(() => _future = _source.getAnime(_slug));
 
   void _play(Episode ep) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => PlayerScreen(slug: _slug, numero: ep.numero, animeTitulo: widget.nombre),
+        builder: (_) => PlayerScreen(
+            sourceId: _source.id,
+            slug: _slug,
+            numero: ep.numero,
+            animeTitulo: widget.nombre),
       ),
     );
   }
@@ -92,7 +101,8 @@ class _DetailScreenState extends State<DetailScreen> {
             final fav = FavoritesService.instance.isFavorite(widget.url);
             return OutlinedButton(
               onPressed: () => FavoritesService.instance
-                  .toggle(FavoriteAnime(nombre: titulo, url: widget.url, imagen: imagen)),
+                  .toggle(FavoriteAnime(
+                  nombre: titulo, url: widget.url, imagen: imagen, sourceId: _source.id)),
               child: Icon(fav ? Icons.bookmark_rounded : Icons.bookmark_add_outlined),
             );
           },

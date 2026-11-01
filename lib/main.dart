@@ -3,6 +3,7 @@ import 'package:media_kit/media_kit.dart';
 import 'services/favorites_service.dart';
 import 'services/http_client.dart';
 import 'services/mediaflow_service.dart';
+import 'services/source_registry.dart';
 import 'ui/screens/home_shell.dart';
 import 'ui/theme/app_theme.dart';
 
@@ -11,6 +12,7 @@ void main() async {
   MediaKit.ensureInitialized();
   await HttpClientService.instance.init();
   await MediaFlowService.start();
+  await initSourceRegistry();
   await FavoritesService.instance.load();
   runApp(const RoloStreamApp());
 }

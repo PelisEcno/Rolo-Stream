@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:latanime_plugin/latanime_plugin.dart';
+
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:rolostream_core/rolostream_core.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/mediaflow_service.dart';
+import '../../services/source_registry.dart';
 import '../theme/app_theme.dart';
 import '../widgets/anime_card.dart';
 import '../widgets/debug_console.dart';
@@ -16,15 +18,24 @@ class PlayerScreen extends StatefulWidget {
   final int numero;
   final String animeTitulo;
 
-  const PlayerScreen(
-      {super.key, required this.slug, required this.numero, required this.animeTitulo});
+  /// Fuente del episodio; si es null se usa la activa.
+  final String? sourceId;
+
+  const PlayerScreen({
+    super.key,
+    required this.slug,
+    required this.numero,
+    required this.animeTitulo,
+    this.sourceId,
+  });
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  final _plugin = LatanimePlugin();
+  late final SourcePlugin _source =
+      pluginRegistry.byId(widget.sourceId ?? '') ?? pluginRegistry.active;
   late final Player _player = Player();
   late final VideoController _controller = VideoController(_player);
 
@@ -95,7 +106,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _error = null;
     });
     try {
-      final servers = await _plugin.getServers(widget.slug, widget.numero);
+      final servers = await _source.getServers(widget.slug, widget.numero);
       if (!mounted) return;
       setState(() => _servers = servers);
       if (servers.isNotEmpty) await _select(0);
@@ -106,15 +117,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  /// El proxy no reconoce algunos alias de los servidores.
+  /// El proxy no reconoce algunos alias de los servidores: se traducen aquí.
+  /// El resto se envía tal cual (en minúsculas).
   String _mapServerNameToProxyHost(String serverName) {
     final name = serverName.trim().toLowerCase();
     switch (name) {
+      // --- Latanime ---
       case 'dsvplay':
       case 'playmogo':
         return 'doodstream';
       case 'lulu':
         return 'lulustream';
+
+      // --- AnimeAV1 (el proxy ya los reconoce con el mismo nombre) ---
+      case 'voe':
+      case 'byse':
+      case 'mp4upload':
+        return name;
+
+      // --- AnimeAV1: pendientes de confirmar con el proxy ---
+      // case 'hls':
+      // case 'zilla':
+      //   return '...';
+      // case 'upnshare':
+      //   return '...';
+      // case 'yourupload':
+      //   return '...';
+      // case 'streamtape':
+      //   return '...';
+
       default:
         return name;
     }

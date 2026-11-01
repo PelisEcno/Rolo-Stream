@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:latanime_plugin/latanime_plugin.dart';
+import 'package:rolostream_core/rolostream_core.dart';
+import '../../services/source_registry.dart';
 import '../theme/app_theme.dart';
 import '../widgets/anime_card.dart';
 import 'detail_screen.dart';
@@ -13,7 +14,7 @@ class AiringScreen extends StatefulWidget {
 }
 
 class _AiringScreenState extends State<AiringScreen> {
-  final _plugin = LatanimePlugin();
+  final SourcePlugin _source = pluginRegistry.active;
   final _scroll = ScrollController();
   final _items = <AiringAnime>[];
   final _seen = <String>{};
@@ -47,7 +48,7 @@ class _AiringScreenState extends State<AiringScreen> {
       _error = null;
     });
     try {
-      final batch = await _plugin.getAiringAnimes(page: _page + 1);
+      final batch = await _source.getAiringAnimes(page: _page + 1);
       if (!mounted) return;
       // Si el sitio repite la última página, no habrá elementos nuevos.
       final fresh = batch.where((a) => _seen.add(a.url)).toList();
@@ -124,7 +125,7 @@ class _AiringScreenState extends State<AiringScreen> {
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => DetailScreen(
+                    builder: (_) => DetailScreen(sourceId: _source.id, 
                         nombre: _items[i].titulo, url: _items[i].url, imagen: _items[i].imagen),
                   ),
                 ),

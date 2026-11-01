@@ -1,48 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:latanime_plugin/latanime_plugin.dart';
+import 'package:rolostream_core/rolostream_core.dart';
+import '../../services/source_registry.dart';
 import '../theme/app_theme.dart';
 import '../widgets/anime_card.dart';
 import 'detail_screen.dart';
 import 'search_screen.dart';
 
-typedef _Options = List<(String value, String label)>;
-
-const _generos = <(String, String)>[
-  ('accion', 'Acción'), ('aventura', 'Aventura'), ('carreras', 'Carreras'),
-  ('ciencia-ficcion', 'Ciencia Ficción'), ('comedia', 'Comedia'), ('cyberpunk', 'Cyberpunk'),
-  ('deportes', 'Deportes'), ('drama', 'Drama'), ('ecchi', 'Ecchi'), ('escolares', 'Escolares'),
-  ('fantasia', 'Fantasía'), ('gore', 'Gore'), ('harem', 'Harem'), ('horror', 'Horror'),
-  ('josei', 'Josei'), ('lucha', 'Lucha'), ('magia', 'Magia'), ('mecha', 'Mecha'),
-  ('militar', 'Militar'), ('misterio', 'Misterio'), ('musica', 'Música'),
-  ('parodias', 'Parodias'), ('psicologico', 'Psicológico'),
-  ('recuerdos-de-la-vida', 'Recuerdos de la vida'), ('seinen', 'Seinen'), ('shojo', 'Shojo'),
-  ('shonen', 'Shonen'), ('sobrenatural', 'Sobrenatural'), ('vampiros', 'Vampiros'),
-  ('yaoi', 'Yaoi'), ('yuri', 'Yuri'), ('latino', 'Latino'), ('espacial', 'Espacial'),
-  ('historico', 'Histórico'), ('samurai', 'Samurai'), ('artes-marciales', 'Artes Marciales'),
-  ('demonios', 'Demonios'), ('romance', 'Romance'), ('dementia', 'Dementia'),
-  ('policia', 'Policía'), ('castellano', 'Castellano'), ('historia-paralela', 'Historia paralela'),
-  ('aenime', 'Aenime'), ('donghua', 'Donghua'), ('blu-ray', 'Blu-ray'),
-  ('monogatari', 'Monogatari'), ('suspenso', 'Suspenso'), ('isekai', 'Isekai'),
-];
-
-final _anios = <(String, String)>[
-  for (var y = 2026; y >= 1982; y--) ('$y', '$y'),
-];
-
-final _letras = <(String, String)>[
-  ('09', '0-9'),
-  for (final c in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']) (c, c),
-];
-
-const _categorias = <(String, String)>[
-  ('anime', 'Anime'), ('ova', 'Ova'), ('Película', 'Película'), ('especial', 'Especial'),
-  ('corto', 'Corto'), ('ona', 'Ona'), ('donghua', 'Donghua'), ('sin-censura', 'Sin Censura'),
-  ('preestreno', 'Preestreno'), ('pelicula-1080p', 'Película 1080p'), ('latino', 'Latino'),
-  ('Película Latino', 'Película Latino'), ('castellano', 'Castellano'),
-  ('Película Castellano', 'Película Castellano'), ('ova-latino', 'Ova Latino'),
-  ('ova-castellano', 'Ova Castellano'), ('latino-sin-censura', 'Latino Sin Censura'),
-  ('live-action', 'Live Action'), ('Cartoon', 'Cartoon'), ('catalan', 'Catalán'),
-];
+typedef _Options = List<FilterOption>;
 
 /// Directorio filtrable con scroll infinito. 'false' = sin filtro.
 class ExploreScreen extends StatefulWidget {
@@ -53,7 +17,7 @@ class ExploreScreen extends StatefulWidget {
 }
 
 class _ExploreScreenState extends State<ExploreScreen> {
-  final _plugin = LatanimePlugin();
+  final SourcePlugin _source = pluginRegistry.active;
   final _scroll = ScrollController();
   final _items = <FilterAnime>[];
   final _seen = <String>{};
@@ -95,7 +59,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
       _error = null;
     });
     try {
-      final batch = await _plugin.getAnimesByFilter(
+      final batch = await _source.getAnimesByFilter(
         genero: _genero,
         fecha: _fecha,
         letra: _letra,
@@ -164,16 +128,16 @@ class _ExploreScreenState extends State<ExploreScreen> {
               child: ListView(
                 controller: controller,
                 children: [
-                  for (final o in [('false', 'Todos'), ...options])
+                  for (final o in [const FilterOption('false', 'Todos'), ...options])
                     ListTile(
-                      title: Text(o.$2,
+                      title: Text(o.label,
                           style: TextStyle(
                               fontWeight: FontWeight.w600,
-                              color: o.$1 == current ? AppColors.primary : null)),
-                      trailing: o.$1 == current
+                              color: o.value == current ? AppColors.primary : null)),
+                      trailing: o.value == current
                           ? const Icon(Icons.check_rounded, color: AppColors.primary)
                           : null,
-                      onTap: () => Navigator.pop(ctx, o.$1),
+                      onTap: () => Navigator.pop(ctx, o.value),
                     ),
                 ],
               ),
@@ -189,7 +153,9 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
   String _label(String name, String value, _Options options) {
     if (value == 'false') return name;
-    return options.firstWhere((o) => o.$1 == value, orElse: () => (value, value)).$2;
+    return options
+        .firstWhere((o) => o.value == value, orElse: () => FilterOption(value, value))
+        .label;
   }
 
   Widget _chip(String name, String value, _Options options, void Function(String) set) {
@@ -224,6 +190,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final opts = _source.filterOptions;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Explorar'),
@@ -246,10 +213,15 @@ class _ExploreScreenState extends State<ExploreScreen> {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
               children: [
-                _chip('Género', _genero, _generos, (v) => _genero = v),
-                _chip('Año', _fecha, _anios, (v) => _fecha = v),
-                _chip('Letra', _letra, _letras, (v) => _letra = v),
-                _chip('Categoría', _categoria, _categorias, (v) => _categoria = v),
+                // Cada fuente ofrece sus propias opciones; una lista vacía oculta el filtro.
+                if (opts.generos.isNotEmpty)
+                  _chip('Género', _genero, opts.generos, (v) => _genero = v),
+                if (opts.anios.isNotEmpty)
+                  _chip('Año', _fecha, opts.anios, (v) => _fecha = v),
+                if (opts.letras.isNotEmpty)
+                  _chip('Letra', _letra, opts.letras, (v) => _letra = v),
+                if (opts.categorias.isNotEmpty)
+                  _chip('Categoría', _categoria, opts.categorias, (v) => _categoria = v),
                 if (_hasFilters)
                   TextButton(
                     onPressed: () {
@@ -301,7 +273,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => DetailScreen(
+                  builder: (_) => DetailScreen(sourceId: _source.id, 
                       nombre: _items[i].titulo, url: _items[i].url, imagen: _items[i].imagen),
                 ),
               ),

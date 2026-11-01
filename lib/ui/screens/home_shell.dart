@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:rolostream_core/rolostream_core.dart';
+import '../../services/source_registry.dart';
 import '../theme/app_theme.dart';
 import 'airing_screen.dart';
 import 'explore_screen.dart';
@@ -17,18 +19,28 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
-  static const _pages = [
-    HomeScreen(),
-    AiringScreen(),
-    ExploreScreen(),
-    FavoritesScreen(),
-    SettingsScreen(),
-  ];
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _index, children: _pages),
+      // Al cambiar de fuente se recrean las pantallas que dependen de ella
+      // (la clave incluye el id), así recargan desde la nueva fuente.
+      body: StreamBuilder<SourcePlugin>(
+        stream: pluginRegistry.changes,
+        initialData: pluginRegistry.active,
+        builder: (context, snap) {
+          final id = snap.data!.id;
+          return IndexedStack(
+            index: _index,
+            children: [
+              HomeScreen(key: ValueKey('home-$id')),
+              AiringScreen(key: ValueKey('airing-$id')),
+              ExploreScreen(key: ValueKey('explore-$id')),
+              const FavoritesScreen(),
+              const SettingsScreen(),
+            ],
+          );
+        },
+      ),
       bottomNavigationBar: DecoratedBox(
         decoration: const BoxDecoration(
           border: Border(top: BorderSide(color: AppColors.divider)),

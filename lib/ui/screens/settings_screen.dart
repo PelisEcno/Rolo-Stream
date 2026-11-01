@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:rolostream_core/rolostream_core.dart';
 import '../../services/favorites_service.dart';
+import '../../services/source_registry.dart';
+import '../widgets/source_picker.dart';
 import '../theme/app_theme.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -72,10 +74,12 @@ class SettingsScreen extends StatelessWidget {
           _tile(Icons.delete_outline_rounded, 'Vaciar Mi lista',
               onTap: () => _clearFavorites(context)),
           const Divider(height: 1),
-          _tile(Icons.extension_outlined, 'Fuente',
-              subtitle: 'Latanime',
-              onTap: () => launchUrl(Uri.parse('https://latanime.org'),
-                  mode: LaunchMode.externalApplication)),
+          StreamBuilder<SourcePlugin>(
+            stream: pluginRegistry.changes,
+            initialData: pluginRegistry.active,
+            builder: (context, snap) => _tile(Icons.extension_outlined, 'Fuente',
+                subtitle: snap.data!.name, onTap: () => showSourcePicker(context)),
+          ),
           const Divider(height: 1),
           _tile(Icons.info_outline_rounded, 'Acerca de',
               subtitle: 'Versión 0.1.0',
