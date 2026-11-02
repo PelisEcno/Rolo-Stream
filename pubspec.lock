@@ -580,6 +580,15 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.3.0"
+  pelisplushd_plugin:
+    dependency: "direct main"
+    description:
+      path: "."
+      ref: main
+      resolved-ref: "05c8647296154b75ac52ccd82b96ef3eec138513"
+      url: "https://github.com/PelisEcno/rolostream-plugin-pelisplushd"
+    source: git
+    version: "1.0.0"
   petitparser:
     dependency: transitive
     description:
