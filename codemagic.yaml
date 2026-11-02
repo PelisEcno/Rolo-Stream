@@ -42,8 +42,8 @@ workflows:
           echo "Creando la estructura correcta del .xcframework..."
           mkdir -p ios/MediaFlowProxyLight/MediaFlowProxyLight.xcframework
           
-          # Movemos todo el contenido extraído a la nueva carpeta
-          mv tmp_extract/* ios/MediaFlowProxyLight/MediaFlowProxyLight.xcframework/
+          # Movemos el CONTENIDO de la carpeta extraída (no la carpeta en sí)
+          mv tmp_extract/MediaFlowProxyLight.xcframework/* ios/MediaFlowProxyLight/MediaFlowProxyLight.xcframework/
           
           # Verificamos que quedó bien armado
           if [ -f "ios/MediaFlowProxyLight/MediaFlowProxyLight.xcframework/Info.plist" ] && [ -d "ios/MediaFlowProxyLight/MediaFlowProxyLight.xcframework/ios-arm64" ]; then
