@@ -30,6 +30,11 @@ dependencies:
       url: https://github.com/PelisEcno/rolostream-plugin-jkanime
       ref: main
 
+  cuevana_plugin:
+    git:
+      url: https://github.com/PelisEcno/rolostream-plugin-cuevana
+      ref: main
+
 
   # HTTP + cookies (usado por la app y por el plugin)
   dio: ^5.7.0
