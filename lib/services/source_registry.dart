@@ -1,4 +1,5 @@
 import 'package:animeav1_plugin/animeav1_source.dart';
+import 'package:animedlatino_plugin/animedlatino_source.dart';
 import 'package:cuevana_plugin/cuevana_source.dart';
 import 'package:jkanime_plugin/jkanime_source.dart';
 import 'package:latanime_plugin/latanime_source.dart';
@@ -14,6 +15,7 @@ final PluginRegistry pluginRegistry = PluginRegistry([
   JKAnimeSource(),
   CuevanaSource(),
   PelisPlusHDSource(),
+  AnimedLatinoSource(),
 ]);
 
 const _prefKey = 'active_source';

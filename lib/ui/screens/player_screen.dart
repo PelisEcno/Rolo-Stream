@@ -161,6 +161,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // --- PelisPlusHD: streamwish / vidhide (arriba), doodstream, voe, filemoon y mp4upload
       //   caen en `default`. Sin extractor: sbfast, vip, netu, upfast.
 
+      // --- AnimedLatino: okru y voe caen en `default` y el proxy los extrae. Sin extractor:
+      //   mega, yourupload, streamsb, vidguard, maru (my.mail.ru), netu (hqq.tv), youtube.
+
       // --- AnimeAV1: player.zilla-networks.com; el proxy lo registra como `zilla` ---
       case 'hls':
       case 'zilla':
