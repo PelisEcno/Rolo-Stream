@@ -135,6 +135,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       case 'mp4upload':
         return name;
 
+      // --- JKAnime: el proxy reconoce estos con el mismo nombre ---
+      //   voe, filemoon, mixdrop, mp4upload, streamtape, doodstream (caen en `default`).
+      //   streamwish, vidhide: sin confirmar con el proxy (se envían tal cual).
+      //   mega, mediafire: son descargas, no embeds reproducibles.
+
       // --- AnimeAV1: pendientes de confirmar con el proxy ---
       // case 'hls':
       // case 'zilla':
