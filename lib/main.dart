@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
+import 'iptv/iptv_service.dart';
 import 'services/favorites_service.dart';
 import 'services/http_client.dart';
 import 'services/mediaflow_service.dart';
@@ -14,6 +15,7 @@ void main() async {
   await MediaFlowService.start();
   await initSourceRegistry();
   await FavoritesService.instance.load();
+  await IPTVService.instance.load();
   runApp(const RoloStreamApp());
 }
 

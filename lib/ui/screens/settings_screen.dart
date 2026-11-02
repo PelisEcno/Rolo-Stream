@@ -3,6 +3,7 @@ import 'package:rolostream_core/rolostream_core.dart';
 import '../../services/favorites_service.dart';
 import '../../services/source_registry.dart';
 import '../widgets/source_picker.dart';
+import 'iptv_manager_screen.dart';
 import '../theme/app_theme.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -73,6 +74,11 @@ class SettingsScreen extends StatelessWidget {
           const Divider(height: 1),
           _tile(Icons.delete_outline_rounded, 'Vaciar Mi lista',
               onTap: () => _clearFavorites(context)),
+          const Divider(height: 1),
+          _tile(Icons.live_tv_rounded, 'Listas IPTV',
+              subtitle: 'Tus listas M3U o Xtream Codes',
+              onTap: () => Navigator.push(
+                  context, MaterialPageRoute(builder: (_) => const IPTVManagerScreen()))),
           const Divider(height: 1),
           StreamBuilder<SourcePlugin>(
             stream: pluginRegistry.changes,
