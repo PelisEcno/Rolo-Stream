@@ -36,7 +36,9 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen> {
   late final SourcePlugin _source =
       pluginRegistry.byId(widget.sourceId ?? '') ?? pluginRegistry.active;
-  late final Player _player = Player();
+  // `warn` deja pasar los avisos de FFmpeg/mpv (hls, tcp, http…) a la consola de depuración.
+  late final Player _player =
+      Player(configuration: const PlayerConfiguration(logLevel: MPVLogLevel.warn));
   late final VideoController _controller = VideoController(_player);
 
   List<VideoServer> _servers = [];
@@ -56,6 +58,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void initState() {
     super.initState();
     _player.stream.error.listen(_onPlayerError);
+    _player.stream.log.listen((l) {
+      final tag = l.level == 'error' || l.level == 'fatal' ? '[PLAYER]' : '[WARN]';
+      _log.add('$tag mpv ${l.prefix}: ${DebugLog.short(l.text, 220)}');
+    });
     // Si el video avanza después de un error, el error era transitorio: quitamos el aviso.
     _player.stream.position.listen((pos) {
       final at = _errorShownAt;
