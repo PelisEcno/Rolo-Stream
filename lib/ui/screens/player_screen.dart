@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../services/mediaflow_service.dart';
 import '../../services/source_registry.dart';
 import '../theme/app_theme.dart';
+import '../utils/episode_label.dart';
 import '../widgets/anime_card.dart';
 import '../widgets/debug_console.dart';
 
@@ -148,6 +149,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       //   voe, filemoon, mixdrop, mp4upload, streamtape, doodstream (caen en `default`).
       //   streamwish, vidhide: sin confirmar con el proxy (se envían tal cual).
       //   mega, mediafire: son descargas, no embeds reproducibles.
+
+      // --- Cuevana: filemoon y doodstream los resuelve el proxy (caen en `default`).
+      //   vidhide, nebula, vsembed, vidlink, videasy, vidapi: el proxy no tiene extractor
+      //   para ellos; se envían tal cual y, si fallan, se abre la URL directa (una página).
 
       // --- AnimeAV1: player.zilla-networks.com; el proxy lo registra como `zilla` ---
       case 'hls':
@@ -381,7 +386,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text('E${widget.numero} • Episodio ${widget.numero}',
+            child: Text('${episodeLabel(widget.numero)} • ${episodeName(widget.numero)}',
                 style: const TextStyle(color: AppColors.textMuted, fontWeight: FontWeight.w600)),
           ),
           const Padding(
@@ -418,7 +423,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Episodio ${widget.numero}',
+            Text(episodeName(widget.numero),
                 style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
             Text(widget.animeTitulo,
                 maxLines: 1,

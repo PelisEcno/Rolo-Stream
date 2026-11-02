@@ -3,6 +3,7 @@ import 'package:rolostream_core/rolostream_core.dart';
 import '../../services/favorites_service.dart';
 import '../../services/source_registry.dart';
 import '../theme/app_theme.dart';
+import '../utils/episode_label.dart';
 import '../widgets/anime_card.dart';
 import 'player_screen.dart';
 
@@ -91,7 +92,7 @@ class _DetailScreenState extends State<DetailScreen> {
             icon: const Icon(Icons.play_arrow_rounded),
             label: Text(d.episodios.isEmpty
                 ? 'SIN EPISODIOS'
-                : 'COMENZAR A VER E${d.episodios.first.numero}'),
+                : 'COMENZAR A VER ${episodeLabel(d.episodios.first.numero)}'),
           ),
         ),
         const SizedBox(width: 12),
@@ -140,11 +141,11 @@ class _DetailScreenState extends State<DetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('E${ep.numero}',
+                  Text(episodeLabel(ep.numero),
                       style: const TextStyle(
                           color: AppColors.primary, fontWeight: FontWeight.w800, fontSize: 12)),
                   const SizedBox(height: 2),
-                  Text('Episodio ${ep.numero}',
+                  Text(episodeName(ep.numero),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontWeight: FontWeight.w600)),
