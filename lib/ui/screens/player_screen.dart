@@ -141,10 +141,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       //   streamwish, vidhide: sin confirmar con el proxy (se envían tal cual).
       //   mega, mediafire: son descargas, no embeds reproducibles.
 
+      // --- AnimeAV1: player.zilla-networks.com; el proxy lo registra como `zilla` ---
+      case 'hls':
+      case 'zilla':
+        return 'zilla';
+
       // --- AnimeAV1: pendientes de confirmar con el proxy ---
-      // case 'hls':
-      // case 'zilla':
-      //   return '...';
       // case 'upnshare':
       //   return '...';
       // case 'yourupload':
