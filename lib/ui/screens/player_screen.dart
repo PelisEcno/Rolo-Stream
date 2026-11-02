@@ -120,7 +120,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// El proxy no reconoce algunos alias de los servidores: se traducen aquí.
   /// El resto se envía tal cual (en minúsculas).
   String _mapServerNameToProxyHost(String serverName) {
-    final name = serverName.trim().toLowerCase();
+    // Algunas fuentes anotan el idioma: "Voe (Latino)" → "voe".
+    final name = serverName.replaceFirst(RegExp(r'\s*\([^)]*\)\s*$'), '').trim().toLowerCase();
     switch (name) {
       // --- Latanime ---
       case 'dsvplay':
