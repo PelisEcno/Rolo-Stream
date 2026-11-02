@@ -10,6 +10,15 @@ packages:
       url: "https://github.com/PelisEcno/rolostream-plugin-animeav1"
     source: git
     version: "1.0.0"
+  animedlatino_plugin:
+    dependency: "direct main"
+    description:
+      path: "."
+      ref: main
+      resolved-ref: "2ef57b84841842373984e38ca71481147aecea3f"
+      url: "https://github.com/PelisEcno/rolostream-plugin-animedlatino"
+    source: git
+    version: "1.0.0"
   archive:
     dependency: transitive
     description:
