@@ -105,6 +105,9 @@ class SectionRow extends StatelessWidget {
           height: height,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
+            // Sin rebote y sin ser el scroll "primario": el vertical es el de la pantalla.
+            physics: const ClampingScrollPhysics(),
+            primary: false,
             padding: const EdgeInsets.symmetric(horizontal: 16),
             itemCount: loading ? 6 : count,
             separatorBuilder: (_, __) => const SizedBox(width: 12),
