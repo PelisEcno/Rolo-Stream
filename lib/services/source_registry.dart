@@ -1,4 +1,5 @@
 import 'package:animeav1_plugin/animeav1_source.dart';
+import 'package:jkanime_plugin/jkanime_source.dart';
 import 'package:latanime_plugin/latanime_source.dart';
 import 'package:rolostream_core/rolostream_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 final PluginRegistry pluginRegistry = PluginRegistry([
   LatanimeSource(),
   AnimeAV1Source(),
+  JKAnimeSource(),
 ]);
 
 const _prefKey = 'active_source';
