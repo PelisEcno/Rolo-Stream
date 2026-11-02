@@ -158,6 +158,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       case 'streamwish':
         return 'streamwish';
 
+      // --- PelisPlusHD: streamwish / vidhide (arriba), doodstream, voe, filemoon y mp4upload
+      //   caen en `default`. Sin extractor: sbfast, vip, netu, upfast.
+
       // --- AnimeAV1: player.zilla-networks.com; el proxy lo registra como `zilla` ---
       case 'hls':
       case 'zilla':
