@@ -130,6 +130,15 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.2"
+  cuevana_plugin:
+    dependency: "direct main"
+    description:
+      path: "."
+      ref: main
+      resolved-ref: "40d752cf2378450bab84726eb2c682a1da250c86"
+      url: "https://github.com/PelisEcno/rolostream-plugin-cuevana"
+    source: git
+    version: "1.0.0"
   cupertino_icons:
     dependency: transitive
     description:
