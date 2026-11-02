@@ -150,9 +150,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       //   streamwish, vidhide: sin confirmar con el proxy (se envían tal cual).
       //   mega, mediafire: son descargas, no embeds reproducibles.
 
-      // --- Cuevana: filemoon y doodstream los resuelve el proxy (caen en `default`).
-      //   vidhide, nebula, vsembed, vidlink, videasy, vidapi: el proxy no tiene extractor
-      //   para ellos; se envían tal cual y, si fallan, se abre la URL directa (una página).
+      // --- Cuevana: filemoon y doodstream caen en `default`. Los hosts .lol (Hyper/Nebula)
+      //   los resuelve el extractor streamwish del proxy.
+      //   vsembed, vidlink, videasy, vidapi: sin extractor que funcione (403/404).
+      case 'vidhide':
+      case 'nebula':
+      case 'streamwish':
+        return 'streamwish';
 
       // --- AnimeAV1: player.zilla-networks.com; el proxy lo registra como `zilla` ---
       case 'hls':
