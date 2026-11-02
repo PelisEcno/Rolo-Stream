@@ -294,7 +294,7 @@ packages:
     description:
       path: "."
       ref: main
-      resolved-ref: "816489f300268775adfec08ba33fa46b65a4a268"
+      resolved-ref: "0fd7af9f666ac9602d6a861e073451d583f88e65"
       url: "https://github.com/PelisEcno/rolostream-plugin-jkanime"
     source: git
     version: "1.0.0"

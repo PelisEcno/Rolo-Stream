@@ -86,17 +86,26 @@ class _HomeScreenState extends State<HomeScreen> {
         color: AppColors.primary,
         edgeOffset: 80,
         onRefresh: _refresh,
-        child: ListView(
-          padding: const EdgeInsets.only(bottom: 24),
-          children: [
-            _HeroSection(future: _seriesFuture, onOpen: _openSerie, onRetry: _reloadSeries),
-            _RecentEpisodesSection(
-                future: _episodesFuture,
-                source: _source,
-                onOpen: _openEpisode,
-                onRetry: _reloadEpisodes),
+        // Un solo scrollable con slivers (la cuadrícula ya no es un GridView anidado con
+        // shrinkWrap). Sin rebote: con el banner detrás de la barra, el rebote de iOS
+        // dejaba ver el fondo vacío encima. AlwaysScrollable mantiene el pull-to-refresh.
+        child: CustomScrollView(
+          physics: const ClampingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+          slivers: [
+            SliverToBoxAdapter(
+              child: _HeroSection(
+                  future: _seriesFuture, onOpen: _openSerie, onRetry: _reloadSeries),
+            ),
+            SliverToBoxAdapter(
+              child: _RecentEpisodesSection(
+                  future: _episodesFuture,
+                  source: _source,
+                  onOpen: _openEpisode,
+                  onRetry: _reloadEpisodes),
+            ),
             _RecentSeriesSection(
                 future: _seriesFuture, onOpen: _openSerie, onRetry: _reloadSeries),
+            const SliverToBoxAdapter(child: SizedBox(height: 24)),
           ],
         ),
       ),
@@ -320,6 +329,7 @@ class _EpisodeCard extends StatelessWidget {
 
 // ───────────────────── 3. Series recientes ─────────────────────
 
+/// Sliver: debe ir directamente en el `CustomScrollView`.
 class _RecentSeriesSection extends StatelessWidget {
   final Future<List<RecentSerie>> future;
   final void Function(RecentSerie) onOpen;
@@ -334,32 +344,31 @@ class _RecentSeriesSection extends StatelessWidget {
       builder: (context, snap) {
         final done = snap.connectionState == ConnectionState.done;
         // El error ya se muestra en el banner, con su botón de reintento.
-        if (done && snap.hasError) return const SizedBox.shrink();
+        if (done && snap.hasError) return const SliverToBoxAdapter();
         final series = snap.data ?? const <RecentSerie>[];
-        if (done && series.isEmpty) return const SizedBox.shrink();
+        if (done && series.isEmpty) return const SliverToBoxAdapter();
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _SectionTitle('Series recientes'),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
+        return SliverMainAxisGroup(
+          slivers: [
+            const SliverToBoxAdapter(child: _SectionTitle('Series recientes')),
+            SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                childAspectRatio: 0.5,
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 16,
+              sliver: SliverGrid.builder(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  childAspectRatio: 0.5,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 16,
+                ),
+                itemCount: done ? series.length : 6,
+                itemBuilder: (_, i) => done
+                    ? AnimeCard(
+                        nombre: series[i].titulo,
+                        imagen: series[i].imagen,
+                        onTap: () => onOpen(series[i]),
+                      )
+                    : const DecoratedBox(decoration: BoxDecoration(color: AppColors.surface)),
               ),
-              itemCount: done ? series.length : 6,
-              itemBuilder: (_, i) => done
-                  ? AnimeCard(
-                      nombre: series[i].titulo,
-                      imagen: series[i].imagen,
-                      onTap: () => onOpen(series[i]),
-                    )
-                  : const DecoratedBox(decoration: BoxDecoration(color: AppColors.surface)),
             ),
           ],
         );
