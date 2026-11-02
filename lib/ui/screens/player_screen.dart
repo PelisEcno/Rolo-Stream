@@ -59,6 +59,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.initState();
     _player.stream.error.listen(_onPlayerError);
     _player.stream.log.listen((l) {
+      // media_kit intenta fijar `osc`, que no existe en el libmpv móvil: es inofensivo.
+      if (l.prefix == 'media_kit' && l.text.contains('_setProperty(osc')) return;
       final tag = l.level == 'error' || l.level == 'fatal' ? '[PLAYER]' : '[WARN]';
       _log.add('$tag mpv ${l.prefix}: ${DebugLog.short(l.text, 220)}');
     });
@@ -189,9 +191,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// Obtiene la URL real del video y los headers que el servidor exige
   /// (Referer, User-Agent) a través del proxy.
   /// Si el proxy no responde o falla, devuelve la URL directa sin headers.
-  Future<({String url, Map<String, String>? headers})> _getProxiedUrl(
-      VideoServer server) async {
-    final direct = (url: server.url, headers: null as Map<String, String>?);
+  ///
+  /// `streamUrl` es el `mediaflow_proxy_url` del JSON, si lo trae: el manifiesto y los
+  /// segmentos pasan por el proxy, que les pone los headers (los CDN que exigen
+  /// cabeceras en cada segmento devuelven 403 si FFmpeg los pide directo).
+  Future<({String url, Map<String, String>? headers, String? streamUrl, String host})>
+      _getProxiedUrl(VideoServer server) async {
+    final direct = (
+      url: server.url,
+      headers: null as Map<String, String>?,
+      streamUrl: null as String?,
+      host: _mapServerNameToProxyHost(server.nombre),
+    );
     if (!await MediaFlowService.ensureRunning()) {
       _log.add('[WARN] Proxy no responde en :${MediaFlowService.port}, uso URL directa');
       return direct;
@@ -217,11 +228,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final destUrl = data is Map ? data['destination_url'] : null;
       if (destUrl is String && destUrl.isNotEmpty) {
         _log.add('[SUCCESS] destination_url: ${DebugLog.short(destUrl)}');
-        final headers = _extractHeaders((data as Map)['request_headers']);
+        final map = data as Map;
+        _log.add('[INFO] campos del proxy: ${map.keys.join(', ')}');
+        final headers = _extractHeaders(map['request_headers']);
         if (headers != null) {
           _log.add('[HEADERS] ${DebugLog.short(headers.entries.map((e) => '${e.key}: ${e.value}').join(' | '), 200)}');
         }
-        return (url: destUrl, headers: headers);
+        return (
+          url: destUrl,
+          headers: headers,
+          streamUrl: _absoluteProxyUrl(map['mediaflow_proxy_url']),
+          host: host,
+        );
       }
       _log.add('[ERROR] ${server.nombre}: sin destination_url (HTTP ${response.statusCode}) '
           '${DebugLog.short(body, 200)}');
@@ -238,6 +256,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return direct;
   }
 
+  /// `mediaflow_proxy_url` puede venir absoluta o como ruta relativa al proxy.
+  String? _absoluteProxyUrl(Object? raw) {
+    if (raw is! String || raw.isEmpty) return null;
+    if (raw.startsWith('http')) return raw;
+    return '${MediaFlowService.proxyUrl}${raw.startsWith('/') ? '' : '/'}$raw';
+  }
+
   /// Toma Referer y User-Agent de `request_headers` (sin distinguir mayúsculas).
   Map<String, String>? _extractHeaders(Object? raw) {
     if (raw is! Map) return null;
@@ -249,7 +274,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return headers.isEmpty ? null : headers;
   }
 
-  Future<void> _select(int i) async {
+    Future<void> _select(int i) async {
     _errorTimer?.cancel();
     _errorShownAt = null;
     setState(() {
@@ -261,8 +286,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final video = await _getProxiedUrl(_servers[i]);
       if (!mounted || _selected != i) return;
 
-      _log.add('[PLAY] media_kit open: ${DebugLog.short(video.url)}');
-      await _player.open(Media(video.url, httpHeaders: video.headers));
+      // Zilla (HLS) responde 403 a los segmentos pedidos directo: se reproduce a través
+      // del proxy cuando éste entrega `mediaflow_proxy_url`.
+      final viaProxy = video.host == 'zilla' && video.streamUrl != null;
+      if (video.host == 'zilla' && !viaProxy) {
+        _log.add('[WARN] el proxy no devolvió mediaflow_proxy_url; se abre directo (puede dar 403)');
+      }
+      
+      var finalUrl = viaProxy ? video.streamUrl! : video.url;
+
+      // Si es Zilla (HLS), añadimos los headers necesarios para saltar el bloqueo de Cloudflare
+      if (viaProxy) {
+        final uri = Uri.parse(finalUrl);
+        final destUrl = uri.queryParameters['d'] ?? 'https://player.zilla-networks.com/';
+        
+        finalUrl = '$finalUrl'
+            '&h_referer=${Uri.encodeComponent(destUrl)}'
+            '&h_range=bytes%3D0-'
+            '&h_sec-fetch-dest=video'
+            '&h_sec-fetch-mode=cors'
+            '&h_sec-fetch-site=same-origin'
+            '&h_accept=*%2F*'
+            '&h_accept-language=en-US%2Cen%3Bq%3D0.9%2Ces%3Bq%3D0.8';
+      }
+
+      _log.add('[PLAY] media_kit open${viaProxy ? ' (vía proxy)' : ''}: '
+          '${DebugLog.short(finalUrl.replaceAll(MediaFlowService.apiPassword, '***'))}');
+      await _player.open(Media(finalUrl, httpHeaders: viaProxy ? null : video.headers));
     } catch (e) {
       _log.add('[PLAYER] ${DebugLog.short(e.toString(), 300)}');
       if (mounted && _selected == i) setState(() => _playError = e.toString());
