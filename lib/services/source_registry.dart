@@ -6,6 +6,7 @@ import 'package:latanime_plugin/latanime_source.dart';
 import 'package:pelisplushd_plugin/pelisplushd_source.dart';
 import 'package:rolostream_core/rolostream_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tioanime_plugin/tioanime_source.dart';
 
 /// Registro único de fuentes. La primera es la que se activa por defecto.
 /// Para agregar una fuente nueva basta con añadirla a esta lista.
@@ -16,6 +17,7 @@ final PluginRegistry pluginRegistry = PluginRegistry([
   CuevanaSource(),
   PelisPlusHDSource(),
   AnimedLatinoSource(),
+  TioAnimeSource(),
 ]);
 
 const _prefKey = 'active_source';

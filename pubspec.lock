@@ -836,6 +836,15 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.11"
+  tioanime_plugin:
+    dependency: "direct main"
+    description:
+      path: "."
+      ref: main
+      resolved-ref: "78e93b4bf574e93f5a60d7a2e94f59e664525b17"
+      url: "https://github.com/PelisEcno/rolostream-plugin-tioanime"
+    source: git
+    version: "1.0.0"
   typed_data:
     dependency: transitive
     description:

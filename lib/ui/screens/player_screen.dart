@@ -143,6 +143,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       case 'voe':
       case 'byse':
       case 'mp4upload':
+      case 'yourupload': // TioAnime / AnimedLatino: extractor `yourupload` del proxy (mp4 directo)
         return name;
 
       // --- JKAnime: el proxy reconoce estos con el mismo nombre ---
@@ -160,6 +161,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
       // --- PelisPlusHD: streamwish / vidhide (arriba), doodstream, voe, filemoon y mp4upload
       //   caen en `default`. Sin extractor: sbfast, vip, netu, upfast.
+
+      // --- TioAnime: voe y yourupload (arriba) y okru (`default`) los extrae el proxy.
+      //   Sin extractor: mega, streamsb, vidguard, maru, netu. mixdrop usa el dominio mixdroop.bz.
 
       // --- AnimedLatino: okru y voe caen en `default` y el proxy los extrae. Sin extractor:
       //   mega, yourupload, streamsb, vidguard, maru (my.mail.ru), netu (hqq.tv), youtube.
