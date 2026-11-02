@@ -6,7 +6,7 @@ packages:
     description:
       path: "."
       ref: main
-      resolved-ref: "4a46922be7c81f8977918d9b474cb1361279ac8f"
+      resolved-ref: "7cfb25e40b4f396297b8e3884610859cd746f04e"
       url: "https://github.com/PelisEcno/rolostream-plugin-animeav1"
     source: git
     version: "1.0.0"
