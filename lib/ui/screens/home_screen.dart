@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rolostream_core/rolostream_core.dart';
 import '../../services/source_registry.dart';
 import '../theme/app_theme.dart';
+import '../utils/episode_label.dart';
 import '../widgets/anime_card.dart';
 import '../widgets/source_picker.dart';
 import 'detail_screen.dart';
@@ -314,7 +315,7 @@ class _EpisodeCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           if (numero != null)
-            Text('E$numero',
+            Text(episodeLabel(numero!),
                 style: const TextStyle(
                     color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w800)),
           Text(ep.titulo,
