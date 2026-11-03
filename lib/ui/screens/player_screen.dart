@@ -323,28 +323,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final video = await _getProxiedUrl(_servers[i]);
       if (!mounted || _selected != i) return;
 
-      // Zilla (HLS) responde 403 a los segmentos pedidos directo: se reproduce a través
-      // del proxy cuando éste entrega `mediaflow_proxy_url`.
-      final viaProxy = video.host == 'zilla' && video.streamUrl != null;
-      if (video.host == 'zilla' && !viaProxy) {
+      final playback = MediaFlowService.playbackUrl(
+        host: video.host,
+        directUrl: video.url,
+        proxyUrl: video.streamUrl,
+      );
+      final viaProxy = playback.viaProxy;
+      final finalUrl = playback.url;
+      if (!viaProxy) {
         _log.add('[WARN] el proxy no devolvió mediaflow_proxy_url; se abre directo (puede dar 403)');
-      }
-      
-      var finalUrl = viaProxy ? video.streamUrl! : video.url;
-
-      // Si es Zilla (HLS), añadimos los headers necesarios para saltar el bloqueo de Cloudflare
-      if (viaProxy) {
-        final uri = Uri.parse(finalUrl);
-        final destUrl = uri.queryParameters['d'] ?? 'https://player.zilla-networks.com/';
-        
-        finalUrl = '$finalUrl'
-            '&h_referer=${Uri.encodeComponent(destUrl)}'
-            '&h_range=bytes%3D0-'
-            '&h_sec-fetch-dest=video'
-            '&h_sec-fetch-mode=cors'
-            '&h_sec-fetch-site=same-origin'
-            '&h_accept=*%2F*'
-            '&h_accept-language=en-US%2Cen%3Bq%3D0.9%2Ces%3Bq%3D0.8';
       }
 
       _log.add('[PLAY] media_kit open${viaProxy ? ' (vía proxy)' : ''}: '
