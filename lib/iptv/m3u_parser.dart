@@ -19,13 +19,14 @@ List<Channel> parseM3U(String content) {
 
   String? nombre;
   String? logo;
+  String? tvgId;
   String? grupo;
   String? extGrp;
   var headers = <String, String>{};
   var pending = false; // hay un #EXTINF esperando su URL
 
   void reset() {
-    nombre = logo = grupo = extGrp = null;
+    nombre = logo = grupo = extGrp = tvgId = null;
     headers = <String, String>{};
     pending = false;
   }
@@ -53,6 +54,7 @@ List<Channel> parseM3U(String content) {
         };
         nombre = namePart.isNotEmpty ? namePart : attrs['tvg-name'];
         logo = _nonEmpty(attrs['tvg-logo']);
+        tvgId = _nonEmpty(attrs['tvg-id']);
         grupo = _nonEmpty(attrs['group-title']);
       } else if (upper.startsWith('#EXTGRP:')) {
         extGrp = _nonEmpty(line.substring(8).trim());
@@ -79,6 +81,7 @@ List<Channel> parseM3U(String content) {
     out.add(Channel(
       nombre: _nonEmpty(nombre) ?? (pending ? 'Canal sin nombre' : _nameFromUrl(line)),
       logo: logo,
+      tvgId: tvgId,
       grupo: grupo ?? extGrp ?? Channel.sinGrupo,
       url: line,
       headers: headers,

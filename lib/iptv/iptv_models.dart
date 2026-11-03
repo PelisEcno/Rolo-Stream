@@ -46,6 +46,9 @@ class IPTVPlaylist {
 class Channel {
   final String nombre;
   final String? logo;
+
+  /// `tvg-id`: identificador del canal en la guía de programación (XMLTV).
+  final String? tvgId;
   final String grupo;
   final String url;
 
@@ -56,6 +59,7 @@ class Channel {
     required this.nombre,
     required this.url,
     this.logo,
+    this.tvgId,
     this.grupo = Channel.sinGrupo,
     this.headers = const {},
   });
