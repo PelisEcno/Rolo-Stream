@@ -327,12 +327,15 @@ AudioTrack? liveAudioTrackToForce(Tracks tracks, Track current) {
 /// Un canal en vivo no se puede pausar.
 class LivePlayButton extends StatelessWidget {
   final Stream<bool> playing;
-  final bool initialPlaying;
+
+  /// Se lee al mostrar el botón, no al crear el widget: el aviso de que empezó a reproducir puede
+  /// llegar antes de empezar a escuchar [playing].
+  final bool Function() isPlaying;
   final VoidCallback onPlay;
   const LivePlayButton({
     super.key,
     required this.playing,
-    required this.initialPlaying,
+    required this.isPlaying,
     required this.onPlay,
   });
 
@@ -340,7 +343,7 @@ class LivePlayButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<bool>(
       stream: playing,
-      initialData: initialPlaying,
+      initialData: isPlaying(),
       builder: (context, snap) {
         if (snap.data == true) return const SizedBox.shrink();
         return IconButton(
@@ -607,7 +610,7 @@ class PremiumVideo extends StatelessWidget {
       quality: QualityButton(player: player),
       livePlayButton: LivePlayButton(
         playing: player.stream.playing,
-        initialPlaying: player.state.playing,
+        isPlaying: () => player.state.playing,
         onPlay: player.play,
       ),
       onVolumeChanged: (v) => player.setVolume(v * 100),

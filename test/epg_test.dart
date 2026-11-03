@@ -441,6 +441,25 @@ void main() {
       expect(deadZone, 72); // sobre unos 210 px de alto
     });
 
+    testWidgets('el botón de directo no aparece si empezó a reproducir antes de escuchar',
+        (tester) async {
+      var isPlaying = false;
+      final playing = StreamController<bool>.broadcast(sync: true);
+      // El aviso de que empezó a reproducir llega antes de que el botón exista.
+      playing.add(true);
+      isPlaying = true;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: LivePlayButton(
+            playing: playing.stream,
+            isPlaying: () => isPlaying,
+            onPlay: () {},
+          ),
+        ),
+      ));
+      expect(find.byType(IconButton), findsNothing);
+    });
+
     testWidgets('el botón de directo solo permite reproducir, nunca pausar', (tester) async {
       final playing = StreamController<bool>(sync: true);
       var plays = 0;
@@ -448,7 +467,7 @@ void main() {
         home: Scaffold(
           body: LivePlayButton(
             playing: playing.stream,
-            initialPlaying: true,
+            isPlaying: () => true,
             onPlay: () => plays++,
           ),
         ),
