@@ -70,6 +70,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _progressTimer;
   ResumeGuard _guard = ResumeGuard(Duration.zero);
   bool _durationLogged = false;
+  int _av1Errors = 0;
+  int _av1ErrorsLogged = 0;
 
   List<VideoServer> _servers = [];
   int _selected = 0;
@@ -91,6 +93,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _player.stream.log.listen((l) {
       // media_kit intenta fijar `osc`, que no existe en el libmpv móvil: es inofensivo.
       if (l.prefix == 'media_kit' && l.text.contains('_setProperty(osc')) return;
+      if (l.prefix == 'ffmpeg' && DebugLog.isAv1ParserNoise(l.text)) {
+        if (_av1Errors++ == 0) {
+          _log.add('[WARN] Parser AV1: ${DebugLog.short(l.text, 120)} (se agrupan los siguientes)');
+        }
+        return;
+      }
       final tag = l.level == 'error' || l.level == 'fatal' ? '[PLAYER]' : '[WARN]';
       _log.add('$tag mpv ${l.prefix}: ${DebugLog.short(l.text, 220)}');
     });
@@ -135,6 +143,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _saveProgress() {
+    if (_av1Errors != _av1ErrorsLogged) {
+      _av1ErrorsLogged = _av1Errors;
+      _log.add('[WARN] Parser AV1: $_av1Errors errores; video en '
+          '${_player.state.position.inSeconds}s de ${_player.state.duration.inSeconds}s');
+    }
     // Solo con el video avanzando: al abrir o reabrir, la posición pasa un momento por 0.
     if (_watchdog.phase.value != PlaybackPhase.playing) return;
     if (!_guard.done) return;

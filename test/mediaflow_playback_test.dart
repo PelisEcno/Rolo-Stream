@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rolostream/services/mediaflow_service.dart';
+import 'package:rolostream/ui/widgets/debug_console.dart';
 
 void main() {
   const direct = 'https://cdn.example/master.m3u8';
@@ -35,6 +36,20 @@ void main() {
           isNot(contains('h_range')),
           reason: host);
     }
+  });
+
+  test('solo se agrupan los errores del parser AV1, no otros del reproductor', () {
+    for (final noise in [
+      'NULL: obu_forbidden_bit out of range: 1, but must be in [0,0].',
+      'NULL: Failed to parse temporal unit.',
+      'NULL: Invalid OBU length: 4427, but only 3 bytes remaining in fragment.',
+      'NULL: seq_profile out of range: 4, but must be in [0,2].',
+      'NULL: Failed to read unit 0 (type 1).',
+    ]) {
+      expect(DebugLog.isAv1ParserNoise(noise), isTrue, reason: noise);
+    }
+    expect(DebugLog.isAv1ParserNoise('hls: Error when loading first segment'), isFalse);
+    expect(DebugLog.isAv1ParserNoise('tcp: Connection timed out'), isFalse);
   });
 
   test('si el proxy no entrega la URL se abre directo', () {

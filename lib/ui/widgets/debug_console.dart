@@ -21,6 +21,13 @@ class DebugLog extends ChangeNotifier {
     notifyListeners();
   }
 
+  static final _av1ParserNoise = RegExp(
+      r'obu_|temporal unit|seq_profile|extension_header_reserved|Failed to read unit|Invalid OBU');
+
+  /// Errores del parser de AV1 de FFmpeg: salen a decenas en una ráfaga y, como el registro guarda
+  /// [_maxLines] líneas, borrarían las del arranque.
+  static bool isAv1ParserNoise(String text) => _av1ParserNoise.hasMatch(text);
+
   /// Recorta textos largos (URLs, cuerpos de respuesta) para el log.
   static String short(String s, [int max = 140]) =>
       s.length <= max ? s : '${s.substring(0, max)}…';
