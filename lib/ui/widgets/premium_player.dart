@@ -121,6 +121,14 @@ class PlaybackWatchdog {
   Duration _progress = Duration.zero;
   Duration _lastGood = Duration.zero;
 
+  /// La línea de tiempo del reproductor cambió (se abrió otro tramo): lo anterior ya no sirve de
+  /// referencia, pero los intentos gastados siguen contando.
+  void resetPosition() {
+    _last = null;
+    _progress = Duration.zero;
+    _lastGood = Duration.zero;
+  }
+
   /// Aún no hay nada que vigilar (por ejemplo, se está resolviendo el servidor).
   void connecting() {
     _timer?.cancel();
@@ -425,6 +433,84 @@ class QualityButton extends StatelessWidget {
   }
 }
 
+/// Barra con el tiempo real del episodio, para cuando el reproductor solo tiene abierto un tramo:
+/// su posición empieza en 0 en [offset] y su duración es la del tramo.
+class TimelineBar extends StatefulWidget {
+  final Stream<Duration> position;
+  final Duration initialPosition;
+  final Duration offset;
+  final Duration total;
+  final void Function(Duration) onSeek;
+  const TimelineBar({
+    super.key,
+    required this.position,
+    required this.initialPosition,
+    required this.offset,
+    required this.total,
+    required this.onSeek,
+  });
+
+  static String format(Duration d) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    final m = two(d.inMinutes % 60);
+    final s = two(d.inSeconds % 60);
+    return d.inHours > 0 ? '${d.inHours}:$m:$s' : '$m:$s';
+  }
+
+  @override
+  State<TimelineBar> createState() => _TimelineBarState();
+}
+
+class _TimelineBarState extends State<TimelineBar> {
+  double? _dragging;
+
+  @override
+  Widget build(BuildContext context) {
+    final max = widget.total.inMilliseconds.toDouble();
+    return StreamBuilder<Duration>(
+      stream: widget.position,
+      initialData: widget.initialPosition,
+      builder: (context, snap) {
+        final real = widget.offset + (snap.data ?? Duration.zero);
+        final value = (_dragging ?? real.inMilliseconds.toDouble()).clamp(0.0, max);
+        return Row(
+          children: [
+            Text(
+              '${TimelineBar.format(Duration(milliseconds: value.round()))} / '
+              '${TimelineBar.format(widget.total)}',
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+            ),
+            Expanded(
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 2.4,
+                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.4),
+                  overlayShape: SliderComponentShape.noOverlay,
+                  activeTrackColor: AppColors.primary,
+                  thumbColor: AppColors.primary,
+                  inactiveTrackColor: const Color(0x3DFFFFFF),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Slider(
+                    value: value,
+                    max: max,
+                    onChanged: (v) => setState(() => _dragging = v),
+                    onChangeEnd: (v) {
+                      setState(() => _dragging = null);
+                      widget.onSeek(Duration(milliseconds: v.round()));
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 /// Tema de los controles. Un directo no tiene barra de progreso, ni nada para buscar o pausar.
 ///
 /// No hay que tocar los márgenes inferiores: `media_kit` excluye `16 + margen + buttonBarHeight`
@@ -440,12 +526,13 @@ MaterialVideoControlsThemeData premiumControlsTheme(
   void Function(double)? onBrightnessChanged,
   double? initialBrightness,
   void Function()? onBrightnessReset,
+  Widget? timeline,
 }) {
   return base.copyWith(
     visibleOnMount: true,
     controlsHoverDuration: const Duration(seconds: 5),
-    displaySeekBar: !live,
-    seekGesture: !live,
+    displaySeekBar: !live && timeline == null,
+    seekGesture: !live && timeline == null,
     seekOnDoubleTap: !live,
     seekOnDoubleTapEnabledWhileControlsVisible: !live,
     speedUpOnLongPress: false,
@@ -463,8 +550,12 @@ MaterialVideoControlsThemeData premiumControlsTheme(
     seekBarThumbColor: AppColors.primary,
     primaryButtonBar: live ? [livePlayButton] : null,
     bottomButtonBar: [
-      if (live) const _LiveBadge() else const MaterialPositionIndicator(),
-      const Spacer(),
+      if (timeline != null)
+        Expanded(child: timeline)
+      else ...[
+        if (live) const _LiveBadge() else const MaterialPositionIndicator(),
+        const Spacer(),
+      ],
       quality,
       const MaterialFullscreenButton(),
     ],
@@ -482,6 +573,9 @@ class PremiumVideo extends StatelessWidget {
   final bool? live;
   final String connectingLabel;
 
+  /// Sustituye a la barra de progreso de `media_kit`: ver [TimelineBar].
+  final Widget? timeline;
+
   const PremiumVideo({
     super.key,
     required this.player,
@@ -489,6 +583,7 @@ class PremiumVideo extends StatelessWidget {
     required this.phase,
     required this.connectingLabel,
     this.live,
+    this.timeline,
   });
 
   MaterialVideoControlsThemeData _theme(MaterialVideoControlsThemeData base, bool isLive) {
@@ -502,6 +597,7 @@ class PremiumVideo extends StatelessWidget {
         onPlay: player.play,
       ),
       onVolumeChanged: (v) => player.setVolume(v * 100),
+      timeline: timeline,
       initialVolume: player.state.volume / 100,
       onBrightnessChanged: (v) {
         _appBrightness = v;

@@ -8,6 +8,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:rolostream_core/rolostream_core.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/app_error.dart';
+import '../../services/hls_window.dart';
 import '../../services/mediaflow_service.dart';
 import '../../services/source_registry.dart';
 import '../../services/watch_progress_service.dart';
@@ -54,6 +55,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
         await _openFromStart();
         return;
       }
+      if (_playlist != null) {
+        // Si se quedó clavado tras un salto, `state.position` ya está en el destino.
+        final stuck = _player.state.position > at ? _player.state.position : at;
+        final real = _offset + stuck;
+        final target = real > _resume ? real : _resume;
+        _log.add('[WARN] El video no avanza: se reabre en ${target.inSeconds}s');
+        await _openWindow(target);
+        return;
+      }
       // Si aún no se llegó al punto guardado, `at` es anterior a él.
       final target = at > _resume ? at : _resume;
       _log.add('[WARN] El video no avanza: se reabre en ${target.inSeconds}s');
@@ -79,6 +89,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// retomarlo con otro servidor.
   Duration? _unreachedResume;
   bool _durationLogged = false;
+
+  /// Servidores donde FFmpeg no puede saltar: se abre el tramo que toca en vez de saltar.
+  HlsPlaylist? _playlist;
+  LocalManifestServer? _manifestServer;
+  final _window = ValueNotifier<HlsWindow?>(null);
+  Duration get _offset => _window.value?.offset ?? Duration.zero;
+  Duration get _realPosition => _offset + _player.state.position;
+  Duration get _realDuration => _window.value?.total ?? _player.state.duration;
+
   int _av1Errors = 0;
   int _av1ErrorsLogged = 0;
 
@@ -141,15 +160,91 @@ class _PlayerScreenState extends State<PlayerScreen> {
             content: Text('Este servidor no pudo retomar donde ibas: empieza desde el inicio. '
                 'Con otro servidor puedes retomarlo.')));
     }
+    if (_playlist != null) {
+      await _openWindow(Duration.zero);
+      return;
+    }
     final old = _media!;
     _media = Media(old.uri, httpHeaders: old.httpHeaders);
     await _player.open(_media!);
   }
 
+  /// Descarga el manifiesto ya reescrito por el proxy. Si no se puede usar, se abre de la forma normal.
+  Future<bool> _prepareWindow(String manifestUrl) async {
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 30),
+      responseType: ResponseType.plain,
+    ));
+    try {
+      final res = await dio.get<String>(manifestUrl);
+      final playlist = HlsPlaylist.parse(res.data ?? '', Uri.parse(manifestUrl));
+      if (playlist == null) {
+        _log.add('[WARN] El manifiesto no admite abrirse por tramos: se abre normal');
+        return false;
+      }
+      _playlist = playlist;
+      _log.add('[INFO] Apertura por tramos: ${playlist.segmentCount} segmentos, '
+          '${playlist.total.inSeconds}s');
+      return true;
+    } catch (e) {
+      _log.add('[WARN] No se pudo leer el manifiesto (${DebugLog.short(e.toString(), 120)}): '
+          'se abre normal');
+      return false;
+    } finally {
+      dio.close();
+    }
+  }
+
+  /// Abre el tramo que contiene [target], sin que FFmpeg tenga que saltar.
+  Future<void> _openWindow(Duration target) async {
+    final window = _playlist!.windowAt(target);
+    final server = await LocalManifestServer.start(window.manifest);
+    final previous = _manifestServer;
+    _manifestServer = server;
+    await previous?.close();
+
+    _log.add('[INFO] Abriendo tramo en ${window.offset.inSeconds}s (pedido ${target.inSeconds}s)');
+    _watchdog.resetPosition();
+    _window.value = window;
+    // No se puede afinar más que el inicio del segmento: un salto es justo lo que falla.
+    _guard = ResumeGuard(window.offset);
+    _durationLogged = false;
+    _media = Media(server.url);
+    await _player.open(_media!);
+  }
+
+  /// Salto pedido desde la barra.
+  Future<void> _seekTo(Duration real) async {
+    final inWindow = real - _offset;
+    final playing = _player.state.position;
+    if (inWindow >= playing && inWindow <= _player.state.buffer) {
+      await _player.seek(inWindow); // ya está en memoria: aquí FFmpeg no interviene
+      return;
+    }
+    _resume = real;
+    _unreachedResume = null;
+    _watchdog.begin();
+    try {
+      await _openWindow(real);
+    } catch (e) {
+      _log.add('[PLAYER] ${DebugLog.short(e.toString(), 300)}');
+    }
+  }
+
+  Future<void> _closeWindow() async {
+    _playlist = null;
+    _window.value = null;
+    final server = _manifestServer;
+    _manifestServer = null;
+    await server?.close();
+  }
+
   /// Con el video ya avanzando, salta al punto guardado si `Media.start` no se cumplió.
-  void _verifyResume(Duration position) {
+  void _verifyResume(Duration windowPosition) {
     if (_watchdog.phase.value != PlaybackPhase.playing) return;
-    final duration = _player.state.duration;
+    final position = _offset + windowPosition;
+    final duration = _realDuration;
     if (!_durationLogged) {
       _durationLogged = true;
       _log.add(duration > Duration.zero
@@ -173,12 +268,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (_av1Errors != _av1ErrorsLogged) {
       _av1ErrorsLogged = _av1Errors;
       _log.add('[WARN] Parser AV1: $_av1Errors errores; video en '
-          '${_player.state.position.inSeconds}s de ${_player.state.duration.inSeconds}s');
+          '${_realPosition.inSeconds}s de ${_realDuration.inSeconds}s');
     }
     // Solo con el video avanzando: al abrir o reabrir, la posición pasa un momento por 0.
     if (_watchdog.phase.value != PlaybackPhase.playing) return;
     if (!_guard.done) return;
-    final position = _player.state.position;
+    final position = _realPosition;
     if (position == _resume) return;
     _resume = position;
     final unreached = _unreachedResume;
@@ -193,7 +288,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       titulo: widget.animeTitulo,
       imagen: widget.imagen,
       position: position,
-      duration: _player.state.duration,
+      duration: _realDuration,
     );
   }
 
@@ -225,6 +320,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     _progressTimer?.cancel();
     _saveProgress();
+    _manifestServer?.close();
+    _window.dispose();
     _errorTimer?.cancel();
     _watchdog.dispose();
     _log.dispose();
@@ -406,6 +503,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _errorTimer?.cancel();
     _errorShownAt = null;
     _watchdog.connecting();
+    _closeWindow();
     setState(() {
       _selected = i;
       _opening = true;
@@ -432,6 +530,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (unreached != null && unreached > _resume) _resume = unreached;
       _unreachedResume = null;
       if (_resume > Duration.zero) _log.add('[INFO] Reanudando en ${_resume.inSeconds}s');
+      // Zilla sirve AV1 en fMP4: FFmpeg se queda clavado al saltar a un segmento sin cargar.
+      if (viaProxy && video.host == 'zilla' && await _prepareWindow(finalUrl)) {
+        if (!mounted || _selected != i) return;
+        _watchdog.begin();
+        await _openWindow(_resume);
+        return;
+      }
       _guard = ResumeGuard(_resume);
       _durationLogged = false;
       _media = Media(
@@ -456,12 +561,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          PremiumVideo(
-            player: _player,
-            controller: _controller,
-            phase: _watchdog.phase,
-            live: false,
-            connectingLabel: 'Conectando al servidor...',
+          ValueListenableBuilder<HlsWindow?>(
+            valueListenable: _window,
+            builder: (context, window, _) => PremiumVideo(
+              player: _player,
+              controller: _controller,
+              phase: _watchdog.phase,
+              live: false,
+              connectingLabel: 'Conectando al servidor...',
+              timeline: window == null
+                  ? null
+                  : TimelineBar(
+                      position: _player.stream.position,
+                      initialPosition: _player.state.position,
+                      offset: window.offset,
+                      total: window.total,
+                      onSeek: _seekTo,
+                    ),
+            ),
           ),
           if (_playError != null && !_opening)
             Container(
