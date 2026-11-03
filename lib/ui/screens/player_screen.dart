@@ -17,6 +17,7 @@ import '../utils/episode_label.dart';
 import '../widgets/anime_card.dart';
 import '../widgets/debug_console.dart';
 import '../widgets/premium_player.dart';
+import 'fvp_test_screen.dart';
 
 class PlayerScreen extends StatefulWidget {
   final String slug;
@@ -79,6 +80,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     },
   );
   Media? _media;
+
+  /// URL del proxy para probar otro motor desde la consola de depuración.
+  String? _proxiedStream;
 
   /// Dónde abrir el video: lo guardado al entrar y, después, por dónde va (también al cambiar de
   /// servidor).
@@ -530,6 +534,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       );
       final viaProxy = playback.viaProxy;
       final finalUrl = playback.url;
+      _proxiedStream = viaProxy ? finalUrl : null;
       if (!viaProxy) {
         _log.add('[WARN] el proxy no devolvió mediaflow_proxy_url; se abre directo (puede dar 403)');
       }
@@ -691,6 +696,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 color: _showConsole ? AppColors.primary : null),
             onPressed: () => setState(() => _showConsole = !_showConsole),
           ),
+          if (_showConsole && _proxiedStream != null)
+            IconButton(
+              tooltip: 'Probar con otro motor',
+              icon: const Icon(Icons.science_outlined),
+              onPressed: () {
+                _player.pause();
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        FvpTestScreen(url: _proxiedStream!, savedPosition: _realPosition),
+                  ),
+                );
+              },
+            ),
           if (_servers.isNotEmpty)
             IconButton(
               tooltip: 'Abrir en navegador',

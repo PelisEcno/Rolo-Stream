@@ -315,6 +315,14 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  fvp:
+    dependency: "direct main"
+    description:
+      name: fvp
+      sha256: "2f4607e07748856dbe268a3b968efe973c27f85ea4e7621c4209783a6dad26a0"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.39.1"
   google_identity_services_web:
     dependency: transitive
     description:

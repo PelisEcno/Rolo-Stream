@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rolostream/ui/screens/fvp_test_screen.dart';
 import 'package:rolostream/ui/theme/app_theme.dart';
 import 'package:rolostream/ui/widgets/anime_card.dart';
 
@@ -79,6 +80,39 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.byType(Flow), findsNothing);
     expect(find.byType(PosterImage), findsOneWidget);
+  });
+
+  group('SeekProbe', () {
+    final t0 = DateTime(2026, 11, 3, 12);
+    const target = Duration(seconds: 526);
+    DateTime at(int s) => t0.add(Duration(seconds: s));
+
+    test('es OK solo si el video avanza tras llegar', () {
+      final p = SeekProbe(target, t0);
+      expect(p.update(const Duration(seconds: 10), at(1)), isNull);
+      expect(p.update(const Duration(seconds: 520), at(2)), isNull);
+      expect(p.update(const Duration(seconds: 520), at(3)), isNull);
+      expect(p.update(const Duration(seconds: 522), at(4)), startsWith('OK'));
+    });
+
+    test('llegar y quedarse quieto es CLAVADO, aunque la posición sea la correcta', () {
+      final p = SeekProbe(target, t0);
+      for (var s = 1; s < 15; s++) {
+        expect(p.update(target, at(s)), isNull);
+      }
+      expect(p.update(target, at(15)), startsWith('CLAVADO'));
+    });
+
+    test('no llegar nunca es CLAVADO', () {
+      final p = SeekProbe(target, t0);
+      expect(p.update(const Duration(seconds: 5), at(16)), startsWith('CLAVADO'));
+    });
+
+    test('seguir avanzando desde antes del salto no cuenta como llegar', () {
+      final p = SeekProbe(target, t0);
+      expect(p.update(const Duration(seconds: 100), at(1)), isNull);
+      expect(p.update(const Duration(seconds: 102), at(3)), isNull);
+    });
   });
 
   testWidgets('tocar la tarjeta llama a onTap', (tester) async {
