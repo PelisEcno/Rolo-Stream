@@ -44,15 +44,11 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "startProxy" -> {
                         // Si Dart lo llama, lanzamos en background también
-                        Thread {
-                            proxyManager.start()
-                        }.start()
+                        runInBackground { proxyManager.start() }
                         result.success(8888)
                     }
                     "restartProxy" -> {
-                        Thread {
-                            proxyManager.restart()
-                        }.start()
+                        runInBackground { proxyManager.restart() }
                         result.success(8888)
                     }
                     "stopProxy" -> {
@@ -68,6 +64,17 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    /// Una excepción sin capturar en un hilo cierra toda la app: el proxy no puede tumbarla.
+    private fun runInBackground(block: () -> Unit) {
+        Thread {
+            try {
+                block()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error en el proxy: ${e.message}", e)
+            }
+        }.start()
     }
 
     override fun onDestroy() {
