@@ -8,6 +8,9 @@ workflows:
       xcode: latest
       cocoapods: default
 
+      groups:
+        - firebase_rs
+
     scripts:
       # 🧹 1. LIMPIEZA PROFUNDA
       - name: Limpieza profunda

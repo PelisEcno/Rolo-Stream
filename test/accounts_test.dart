@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rolostream/firebase_options.dart';
 import 'package:rolostream/services/auth_service.dart';
 import 'package:rolostream/services/profile_service.dart';
 import 'package:rolostream/services/watch_progress_service.dart';
@@ -153,10 +152,6 @@ void main() {
       await svc.remove(p.id);
       expect(svc.profiles, isEmpty);
     });
-  });
-
-  test('sin configurar, las opciones de Firebase avisan en vez de romper la compilación', () {
-    expect(() => DefaultFirebaseOptions.currentPlatform, throwsUnsupportedError);
   });
 
   group('AuthGate', () {

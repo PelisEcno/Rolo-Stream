@@ -1,4 +1,4 @@
-package com.example.rolostream
+package com.jcstudiodev.rolostream
 
 import android.os.Bundle
 import android.util.Log
