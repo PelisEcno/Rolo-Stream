@@ -102,7 +102,7 @@ void main() {
       return p;
     }
 
-    testWidgets('muestra los grupos cerrados, expande uno y lista sus canales', (tester) async {
+    testWidgets('muestra el primer grupo en cuadrícula y cambia de grupo con las pestañas', (tester) async {
       final p = await seeded();
       await tester.pumpWidget(app(IPTVChannelListScreen(playlist: p)));
       await tester.pumpAndSettle();
@@ -110,14 +110,12 @@ void main() {
       expect(find.text('Buscar entre 150000 canales'), findsOneWidget);
       expect(find.text('Grupo 0'), findsOneWidget);
       expect(find.text('600'), findsWidgets); // contador del grupo
-      expect(find.text('Canal 0-0'), findsNothing); // cerrado: no hay canales
-
-      await tester.tap(find.text('Grupo 0'));
-      await tester.pumpAndSettle();
       expect(find.text('Canal 0-0'), findsOneWidget);
+      expect(find.byType(GridView), findsOneWidget);
 
-      await tester.tap(find.text('Grupo 0')); // se vuelve a cerrar
+      await tester.tap(find.text('Grupo 1'));
       await tester.pumpAndSettle();
+      expect(find.text('Canal 1-0'), findsOneWidget);
       expect(find.text('Canal 0-0'), findsNothing);
     });
 

@@ -49,6 +49,12 @@ class MainActivity : FlutterActivity() {
                         }.start()
                         result.success(8888)
                     }
+                    "restartProxy" -> {
+                        Thread {
+                            proxyManager.restart()
+                        }.start()
+                        result.success(8888)
+                    }
                     "stopProxy" -> {
                         proxyManager.stop()
                         result.success(null)

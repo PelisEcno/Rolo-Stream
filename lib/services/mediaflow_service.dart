@@ -74,8 +74,14 @@ class MediaFlowService {
 
   static Future<bool>? _ensuring;
 
+  /// Comprueba el puerto. Solo se cambia en las pruebas.
+  @visibleForTesting
+  static Future<bool> Function() probe = _probePort;
+
   /// true si algo escucha en el puerto del proxy.
-  static Future<bool> isRunning() async {
+  static Future<bool> isRunning() => probe();
+
+  static Future<bool> _probePort() async {
     try {
       final sock = await Socket.connect('127.0.0.1', _port,
           timeout: const Duration(milliseconds: 600));
@@ -96,13 +102,30 @@ class MediaFlowService {
   static Future<bool> _ensureRunning() async {
     if (await isRunning()) return true;
     debugPrint('MediaFlow no responde, reiniciando…');
-    await start();
-    // En Android el arranque es asíncrono: esperamos a que abra el puerto.
-    for (var i = 0; i < 10; i++) {
+    await restart();
+    // El arranque es asíncrono: esperamos a que abra el puerto.
+    for (var i = 0; i < 15; i++) {
       if (await isRunning()) return true;
       await Future<void>.delayed(const Duration(milliseconds: 300));
     }
     return false;
+  }
+
+  /// Reinicia el proxy aunque el lado nativo crea que sigue vivo.
+  ///
+  /// Con el puerto sin responder, `startProxy` no sirve: al suspender la app iOS se lleva el
+  /// socket, pero el flag del servidor sigue en `true` y solo contesta "ya estaba corriendo".
+  static Future<void> restart() async {
+    try {
+      final int? port = await _channel
+          .invokeMethod<int>('restartProxy')
+          .timeout(const Duration(seconds: 5));
+      _port = port ?? defaultPort;
+      _nativeRunning = port != null;
+    } catch (e) {
+      debugPrint('MediaFlow no se reinició ($e).');
+      _nativeRunning = false;
+    }
   }
 
   /// Detiene el proxy nativo.

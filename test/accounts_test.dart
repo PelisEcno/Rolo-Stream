@@ -225,6 +225,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Añadir perfil'), findsNothing);
 
+      await tester.ensureVisible(find.text('Administrar perfiles')); // con avatares grandes hay scroll
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Administrar perfiles'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('P0'));
@@ -235,6 +237,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(profiles.profiles.length, 3);
 
+      await tester.ensureVisible(find.text('LISTO'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('LISTO'));
       await tester.pumpAndSettle();
       expect(find.text('Añadir perfil'), findsOneWidget);

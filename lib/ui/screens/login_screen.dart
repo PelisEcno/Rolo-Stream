@@ -33,14 +33,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final ready = AuthService.instance.firebaseReady;
     return Scaffold(
-      body: DecoratedBox(
-        decoration: const BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment(0, -0.7),
-            radius: 1.1,
-            colors: [Color(0x55E50914), AppColors.background],
-          ),
-        ),
+      body: SizedBox.expand(
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
@@ -102,11 +95,7 @@ class _GoogleButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadius.button),
-        boxShadow: AppShadows.soft,
-      ),
+    return SizedBox(
       child: FilledButton(
         onPressed: busy ? null : onPressed,
         style: FilledButton.styleFrom(

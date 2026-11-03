@@ -253,10 +253,7 @@ class _DetailScreenState extends State<DetailScreen> {
                 )
               else if (snap.hasError)
                 SliverToBoxAdapter(
-                  child: ErrorState(
-                      title: 'No se pudo cargar la serie',
-                      detail: snap.error.toString(),
-                      onRetry: _retry),
+                  child: ErrorState(error: snap.error, onRetry: _retry),
                 )
               else if (d != null)
                 SliverPadding(
