@@ -1,6 +1,8 @@
 package com.jcstudiodev.rolostream
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import java.io.File
@@ -30,7 +32,7 @@ class ProxyManager(private val context: Context) {
             val outputFile = File(binaryPath)
             if (!outputFile.exists()) {
                 Log.e(TAG, "❌ El binario no existe en $binaryPath")
-                Toast.makeText(context, "❌ Error: Motor de video no encontrado", Toast.LENGTH_LONG).show()
+                showToast("Motor de video no encontrado")
                 return
             }
 
@@ -57,7 +59,14 @@ class ProxyManager(private val context: Context) {
 
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error arrancando proxy: ${e.message}", e)
-            Toast.makeText(context, "⚠️ Error al iniciar reproductor", Toast.LENGTH_LONG).show()
+            showToast("Error al iniciar el reproductor")
+        }
+    }
+
+    /// start() corre en un hilo de fondo: un Toast desde ahí lanza una excepción que cierra la app.
+    private fun showToast(message: String) {
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
         }
     }
 

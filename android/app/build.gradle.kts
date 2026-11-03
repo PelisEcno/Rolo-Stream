@@ -30,6 +30,14 @@ android {
         versionName = flutter.versionName
     }
 
+    // El proxy es un ejecutable que se lanza desde nativeLibraryDir: las librerías tienen que estar
+    // extraídas en disco. Sin esto se quedan dentro del APK y ese archivo no existe.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
