@@ -70,6 +70,17 @@ class ResumeGuard {
   int seeks = 0;
   DateTime? _lastSeek;
 
+  int _stalls = 0;
+
+  /// El video no avanzó y va a reabrirse. Devuelve `true` si hay que dejar de intentar el punto
+  /// guardado y abrir desde el inicio: en algunos HLS el salto deja el video clavado. Se reintenta
+  /// una vez, porque un servidor simplemente lento también llega aquí.
+  bool shouldFallBackToStart() {
+    if (done || target <= Duration.zero) return false;
+    _stalls++;
+    return _stalls >= 2;
+  }
+
   /// Con el video ya avanzando: devuelve a dónde saltar, o `null` si no hay que hacer nada.
   Duration? check(Duration position, DateTime now) {
     if (done) return null;
