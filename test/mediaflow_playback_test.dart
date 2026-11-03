@@ -28,6 +28,15 @@ void main() {
     expect(p.url, contains('h_sec-fetch-dest=video'));
   });
 
+  test('ningún host fija Range: el proxy pisaría el que pide FFmpeg y leería bytes equivocados', () {
+    for (final host in ['zilla', 'voe', 'mp4upload']) {
+      final p = MediaFlowService.playbackUrl(host: host, directUrl: direct, proxyUrl: proxy);
+      expect(Uri.parse(p.url).queryParameters.keys.map((k) => k.toLowerCase()),
+          isNot(contains('h_range')),
+          reason: host);
+    }
+  });
+
   test('si el proxy no entrega la URL se abre directo', () {
     final p = MediaFlowService.playbackUrl(host: 'voe', directUrl: direct);
     expect(p.viaProxy, isFalse);

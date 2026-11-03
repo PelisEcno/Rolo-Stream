@@ -39,7 +39,6 @@ class MediaFlowService {
     return (
       url: '$proxyUrl'
           '&h_referer=${Uri.encodeComponent(destUrl)}'
-          '&h_range=bytes%3D0-'
           '&h_sec-fetch-dest=video'
           '&h_sec-fetch-mode=cors'
           '&h_sec-fetch-site=same-origin'
