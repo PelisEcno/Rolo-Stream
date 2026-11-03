@@ -75,9 +75,11 @@ class _ParallaxDelegate extends FlowDelegate {
 
   @override
   void paintChildren(FlowPaintingContext context) {
-    final extra = context.getChildSize(0)! - context.size as Size;
-    var dx = -extra.width / 2;
-    var dy = -extra.height / 2;
+    final child = context.getChildSize(0)!;
+    final extraW = child.width - context.size.width;
+    final extraH = child.height - context.size.height;
+    var dx = -extraW / 2;
+    var dy = -extraH / 2;
 
     final viewport = scrollable.context.findRenderObject();
     final box = item.findRenderObject();
@@ -85,10 +87,10 @@ class _ParallaxDelegate extends FlowDelegate {
       final center = box.localToGlobal(box.size.center(Offset.zero), ancestor: viewport);
       if (axisDirectionToAxis(scrollable.axisDirection) == Axis.horizontal) {
         final f = (center.dx / viewport.size.width - 0.5).clamp(-1.0, 1.0);
-        dx -= f * extra.width / 2;
+        dx -= f * extraW / 2;
       } else {
         final f = (center.dy / viewport.size.height - 0.5).clamp(-1.0, 1.0);
-        dy -= f * extra.height / 2;
+        dy -= f * extraH / 2;
       }
     }
     context.paintChild(0, transform: Matrix4.translationValues(dx, dy, 0));
