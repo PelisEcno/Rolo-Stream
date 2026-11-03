@@ -8,7 +8,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:rolostream_core/rolostream_core.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/app_error.dart';
-import '../../services/hls_window.dart';
+import '../../services/mdk_engine.dart';
 import '../../services/mediaflow_service.dart';
 import '../../services/source_registry.dart';
 import '../../services/watch_progress_service.dart';
@@ -16,8 +16,8 @@ import '../theme/app_theme.dart';
 import '../utils/episode_label.dart';
 import '../widgets/anime_card.dart';
 import '../widgets/debug_console.dart';
+import '../widgets/engine_video.dart';
 import '../widgets/premium_player.dart';
-import 'fvp_test_screen.dart';
 
 class PlayerScreen extends StatefulWidget {
   final String slug;
@@ -43,8 +43,9 @@ class PlayerScreen extends StatefulWidget {
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
-/// Servidores con los que FFmpeg se queda clavado al saltar a un segmento sin cargar.
-const _windowHosts = {'zilla', 'byse'};
+/// Servidores con los que FFmpeg, dentro de `media_kit`, se queda clavado al saltar a un segmento sin
+/// cargar: usan el motor de `fvp`.
+const _mdkHosts = {'zilla', 'byse'};
 
 class _PlayerScreenState extends State<PlayerScreen> {
   late final SourcePlugin _source =
@@ -52,20 +53,31 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // `warn` deja pasar los avisos de FFmpeg/mpv (hls, tcp, http…) a la consola de depuración.
   late final Player _player = createPremiumPlayer(logLevel: MPVLogLevel.warn);
   late final VideoController _controller = createPremiumController(_player);
-  late final PlaybackWatchdog _watchdog = PlaybackWatchdog(
-    _player,
+
+  /// Motor alternativo, creado solo si hace falta.
+  MdkEngine? _mdk;
+  String? _mdkUrl;
+  final _mdkActive = ValueNotifier<bool>(false);
+
+  /// Posición del motor en uso.
+  final _positions = StreamController<Duration>.broadcast();
+
+  late final PlaybackWatchdog _watchdog = PlaybackWatchdog.withSource(
+    position: _positions.stream,
+    shouldWatch: () =>
+        _mdkActive.value ? _engine.playing.value && !_engine.completed : _player.state.playing && !_player.state.completed,
     reopen: (at) async {
       if (_guard.shouldFallBackToStart()) {
         await _openFromStart();
         return;
       }
-      if (_playlist != null) {
-        // Si se quedó clavado tras un salto, `state.position` ya está en el destino.
-        final stuck = _player.state.position > at ? _player.state.position : at;
-        final real = _offset + stuck;
-        final target = real > _resume ? real : _resume;
+      if (_mdkActive.value) {
+        // Si se quedó clavado tras un salto, la posición ya está en el destino.
+        final stuck = _engine.position > at ? _engine.position : at;
+        final target = stuck > _resume ? stuck : _resume;
         _log.add('[WARN] El video no avanza: se reabre en ${target.inSeconds}s');
-        await _openWindow(target);
+        _watchdog.resetPosition();
+        await _engine.open(_mdkUrl!, start: target);
         return;
       }
       // Si aún no se llegó al punto guardado, `at` es anterior a él.
@@ -75,14 +87,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     },
     onGiveUp: () {
       if (!mounted) return;
-      _errorShownAt = _player.state.position; // el aviso se quita solo si el video vuelve a avanzar
+      _errorShownAt = _currentPosition; // el aviso se quita solo si el video vuelve a avanzar
       setState(() => _playError = 'Se perdió la conexión con el servidor');
     },
   );
   Media? _media;
-
-  /// URL del proxy para probar otro motor desde la consola de depuración.
-  String? _proxiedStream;
 
   /// Dónde abrir el video: lo guardado al entrar y, después, por dónde va (también al cambiar de
   /// servidor).
@@ -97,13 +106,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Duration? _unreachedResume;
   bool _durationLogged = false;
 
-  /// Servidores donde FFmpeg no puede saltar: se abre el tramo que toca en vez de saltar.
-  HlsPlaylist? _playlist;
-  LocalManifestServer? _manifestServer;
-  final _window = ValueNotifier<HlsWindow?>(null);
-  Duration get _offset => _window.value?.offset ?? Duration.zero;
-  Duration get _realPosition => _offset + _player.state.position;
-  Duration get _realDuration => _window.value?.total ?? _player.state.duration;
+  MdkEngine get _engine {
+    final existing = _mdk;
+    if (existing != null) return existing;
+    final engine = MdkEngine(onLog: _log.add);
+    engine.positionStream.listen((p) {
+      if (_mdkActive.value) _positions.add(p);
+    });
+    engine.errors.listen(_onMdkError);
+    return _mdk = engine;
+  }
+
+  Duration get _currentPosition => _mdkActive.value ? _engine.position : _player.state.position;
+  Duration get _currentDuration => _mdkActive.value ? _engine.duration : _player.state.duration;
+  bool get _isPlaying => _mdkActive.value ? _engine.playing.value : _player.state.playing;
 
   int _av1Errors = 0;
   int _av1ErrorsLogged = 0;
@@ -137,19 +153,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final tag = l.level == 'error' || l.level == 'fatal' ? '[PLAYER]' : '[WARN]';
       _log.add('$tag mpv ${l.prefix}: ${DebugLog.short(l.text, 220)}');
     });
+    _player.stream.position.listen((p) {
+      if (!_mdkActive.value) _positions.add(p);
+    });
     // Si el video avanza después de un error, el error era transitorio: quitamos el aviso.
-    _player.stream.position.listen((pos) {
+    _positions.stream.listen((pos) {
       final at = _errorShownAt;
       if (_playError != null &&
           at != null &&
-          _player.state.playing &&
+          _isPlaying &&
           pos - at > const Duration(seconds: 1)) {
         _errorShownAt = null;
         _watchdog.begin();
         if (mounted) setState(() => _playError = null);
       }
     });
-    _player.stream.position.listen(_verifyResume);
+    _positions.stream.listen(_verifyResume);
     _progressTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
     _load();
   }
@@ -167,8 +186,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
             content: Text('Este servidor no pudo retomar donde ibas: empieza desde el inicio. '
                 'Con otro servidor puedes retomarlo.')));
     }
-    if (_playlist != null) {
-      await _openWindow(Duration.zero);
+    if (_mdkActive.value) {
+      _watchdog.resetPosition();
+      await _engine.open(_mdkUrl!);
       return;
     }
     final old = _media!;
@@ -176,89 +196,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     await _player.open(_media!);
   }
 
-  /// Descarga el manifiesto ya reescrito por el proxy. Si no se puede usar, se abre de la forma normal.
-  Future<bool> _prepareWindow(String manifestUrl) async {
-    final dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 30),
-      responseType: ResponseType.plain,
-    ));
-    try {
-      var url = manifestUrl;
-      var text = (await dio.get<String>(url)).data ?? '';
-      final variant = HlsPlaylist.bestVariant(text, Uri.parse(url));
-      if (variant != null) {
-        _log.add('[INFO] Playlist maestro: se usa la variante de mayor calidad');
-        url = variant;
-        text = (await dio.get<String>(url)).data ?? '';
-      }
-      final playlist = HlsPlaylist.parse(text, Uri.parse(url));
-      if (playlist == null) {
-        _log.add('[WARN] El manifiesto no admite abrirse por tramos: se abre normal');
-        return false;
-      }
-      _playlist = playlist;
-      _log.add('[INFO] Apertura por tramos: ${playlist.segmentCount} segmentos, '
-          '${playlist.total.inSeconds}s');
-      return true;
-    } catch (e) {
-      _log.add('[WARN] No se pudo leer el manifiesto (${DebugLog.short(e.toString(), 120)}): '
-          'se abre normal');
-      return false;
-    } finally {
-      dio.close();
-    }
-  }
-
-  /// Abre el tramo que contiene [target], sin que FFmpeg tenga que saltar.
-  Future<void> _openWindow(Duration target) async {
-    final window = _playlist!.windowAt(target);
-    final server = await LocalManifestServer.start(window.manifest);
-    final previous = _manifestServer;
-    _manifestServer = server;
-    await previous?.close();
-
-    _log.add('[INFO] Abriendo tramo en ${window.offset.inSeconds}s (pedido ${target.inSeconds}s)');
-    _watchdog.resetPosition();
-    _window.value = window;
-    // No se puede afinar más que el inicio del segmento: un salto es justo lo que falla.
-    _guard = ResumeGuard(window.offset);
-    _durationLogged = false;
-    _media = Media(server.url);
-    await _player.open(_media!);
-  }
-
-  /// Salto pedido desde la barra.
-  Future<void> _seekTo(Duration real) async {
-    final inWindow = real - _offset;
-    final playing = _player.state.position;
-    if (inWindow >= playing && inWindow <= _player.state.buffer) {
-      await _player.seek(inWindow); // ya está en memoria: aquí FFmpeg no interviene
-      return;
-    }
-    _resume = real;
-    _unreachedResume = null;
-    _watchdog.begin();
-    try {
-      await _openWindow(real);
-    } catch (e) {
-      _log.add('[PLAYER] ${DebugLog.short(e.toString(), 300)}');
-    }
-  }
-
-  Future<void> _closeWindow() async {
-    _playlist = null;
-    _window.value = null;
-    final server = _manifestServer;
-    _manifestServer = null;
-    await server?.close();
+  void _onMdkError(String message) {
+    _log.add('[PLAYER] ${DebugLog.short(message, 300)}');
+    if (!mounted || !_mdkActive.value) return;
+    _watchdog.stop();
+    setState(() => _playError = message);
   }
 
   /// Con el video ya avanzando, salta al punto guardado si `Media.start` no se cumplió.
-  void _verifyResume(Duration windowPosition) {
+  void _verifyResume(Duration position) {
     if (_watchdog.phase.value != PlaybackPhase.playing) return;
-    final position = _offset + windowPosition;
-    final duration = _realDuration;
+    final duration = _currentDuration;
     if (!_durationLogged) {
       _durationLogged = true;
       _log.add(duration > Duration.zero
@@ -271,7 +219,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (jump != null) {
       _log.add('[WARN] Arrancó en ${position.inSeconds}s en vez de ${jump.inSeconds}s: '
           'se salta (intento ${_guard.seeks})');
-      _player.seek(jump);
+      _mdkActive.value ? _engine.seek(jump) : _player.seek(jump);
     } else if (_guard.gaveUp) {
       _guard.gaveUp = false;
       _log.add('[WARN] Este servidor no permitió saltar a ${_guard.target.inSeconds}s');
@@ -282,12 +230,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (_av1Errors != _av1ErrorsLogged) {
       _av1ErrorsLogged = _av1Errors;
       _log.add('[WARN] Parser AV1: $_av1Errors errores; video en '
-          '${_realPosition.inSeconds}s de ${_realDuration.inSeconds}s');
+          '${_currentPosition.inSeconds}s de ${_currentDuration.inSeconds}s');
     }
     // Solo con el video avanzando: al abrir o reabrir, la posición pasa un momento por 0.
     if (_watchdog.phase.value != PlaybackPhase.playing) return;
     if (!_guard.done) return;
-    final position = _realPosition;
+    final position = _currentPosition;
     if (position == _resume) return;
     _resume = position;
     final unreached = _unreachedResume;
@@ -302,7 +250,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       titulo: widget.animeTitulo,
       imagen: widget.imagen,
       position: position,
-      duration: _realDuration,
+      duration: _currentDuration,
     );
   }
 
@@ -334,11 +282,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     _progressTimer?.cancel();
     _saveProgress();
-    _manifestServer?.close();
-    _window.dispose();
     _errorTimer?.cancel();
     _watchdog.dispose();
     _log.dispose();
+    _mdk?.dispose();
+    _mdkActive.dispose();
+    _positions.close();
     _player.dispose();
     super.dispose();
   }
@@ -517,7 +466,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _errorTimer?.cancel();
     _errorShownAt = null;
     _watchdog.connecting();
-    _closeWindow();
     setState(() {
       _selected = i;
       _opening = true;
@@ -534,25 +482,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
       );
       final viaProxy = playback.viaProxy;
       final finalUrl = playback.url;
-      _proxiedStream = viaProxy ? finalUrl : null;
       if (!viaProxy) {
         _log.add('[WARN] el proxy no devolvió mediaflow_proxy_url; se abre directo (puede dar 403)');
       }
 
-      _log.add('[PLAY] media_kit open${viaProxy ? ' (vía proxy)' : ''}: '
+      final useMdk = viaProxy && _mdkHosts.contains(video.host);
+      _log.add('[PLAY] ${useMdk ? 'fvp' : 'media_kit'} open${viaProxy ? ' (vía proxy)' : ''}: '
           '${DebugLog.short(finalUrl.replaceAll(MediaFlowService.apiPassword, '***'))}');
       final unreached = _unreachedResume;
       if (unreached != null && unreached > _resume) _resume = unreached;
       _unreachedResume = null;
       if (_resume > Duration.zero) _log.add('[INFO] Reanudando en ${_resume.inSeconds}s');
-      if (viaProxy && _windowHosts.contains(video.host) && await _prepareWindow(finalUrl)) {
-        if (!mounted || _selected != i) return;
-        _watchdog.begin();
-        await _openWindow(_resume);
-        return;
-      }
-      _guard = ResumeGuard(_resume);
       _durationLogged = false;
+      if (useMdk) {
+        try {
+          await _openWithMdk(finalUrl);
+          return;
+        } catch (e) {
+          // Si el motor no está disponible, `media_kit` al menos reproduce desde donde pueda.
+          _log.add('[WARN] fvp no disponible (${DebugLog.short(e.toString(), 200)}): se usa media_kit');
+        }
+      }
+      _mdk?.stop();
+      _mdkActive.value = false;
+      _guard = ResumeGuard(_resume);
       _media = Media(
         finalUrl,
         httpHeaders: viaProxy ? null : video.headers,
@@ -569,29 +522,40 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  Future<void> _openWithMdk(String url) async {
+    final engine = _engine;
+    await _player.stop();
+    _mdkUrl = url;
+    _mdkActive.value = true;
+    // Un salto cae en el fotograma clave anterior, que puede estar varios segundos antes.
+    const margin = Duration(seconds: 30);
+    _guard = ResumeGuard(_resume > margin ? _resume - margin : Duration.zero);
+    _watchdog.begin();
+    await engine.open(url, start: _resume);
+  }
+
   Widget _videoArea() {
     return AspectRatio(
       aspectRatio: 16 / 9,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          ValueListenableBuilder<HlsWindow?>(
-            valueListenable: _window,
-            builder: (context, window, _) => PremiumVideo(
-              player: _player,
-              controller: _controller,
-              phase: _watchdog.phase,
-              live: false,
-              connectingLabel: 'Conectando al servidor...',
-              timeline: window == null
-                  ? null
-                  : TimelineBar(
-                      position: _player.stream.position,
-                      currentPosition: () => _player.state.position,
-                      window: _window,
-                      onSeek: _seekTo,
-                    ),
-            ),
+          ValueListenableBuilder<bool>(
+            valueListenable: _mdkActive,
+            builder: (context, useMdk, _) => useMdk
+                ? EngineVideoView(
+                    model: _engine,
+                    surface: _engine.surface(),
+                    phase: _watchdog.phase,
+                    connectingLabel: 'Conectando al servidor...',
+                  )
+                : PremiumVideo(
+                    player: _player,
+                    controller: _controller,
+                    phase: _watchdog.phase,
+                    live: false,
+                    connectingLabel: 'Conectando al servidor...',
+                  ),
           ),
           if (_playError != null && !_opening)
             Container(
@@ -696,21 +660,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 color: _showConsole ? AppColors.primary : null),
             onPressed: () => setState(() => _showConsole = !_showConsole),
           ),
-          if (_showConsole && _proxiedStream != null)
-            IconButton(
-              tooltip: 'Probar con otro motor',
-              icon: const Icon(Icons.science_outlined),
-              onPressed: () {
-                _player.pause();
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        FvpTestScreen(url: _proxiedStream!, savedPosition: _realPosition),
-                  ),
-                );
-              },
-            ),
           if (_servers.isNotEmpty)
             IconButton(
               tooltip: 'Abrir en navegador',
