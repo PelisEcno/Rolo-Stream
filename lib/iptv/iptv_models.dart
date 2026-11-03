@@ -65,4 +65,19 @@ class Channel {
   });
 
   static const sinGrupo = 'Sin grupo';
+
+  static final _vodExtension = RegExp(r'\.(mp4|mkv|avi|mov|wmv|flv|webm|mpe?g)$');
+
+  /// Si es un canal en vivo, según su URL: `true` directo, `false` película o serie, `null` no se
+  /// sabe (un `.m3u8` cualquiera; lo decide la duración que informe el reproductor).
+  ///
+  /// Una lista IPTV mezcla ambos. Xtream Codes: `/usuario/clave/123` o `/live/…` son directos,
+  /// `/movie/…` y `/series/…` no.
+  bool? get isLive {
+    final path = Uri.tryParse(url)?.path.toLowerCase() ?? '';
+    if (path.startsWith('/movie/') || path.startsWith('/series/')) return false;
+    if (_vodExtension.hasMatch(path)) return false;
+    if (path.startsWith('/live/') || path.endsWith('.ts')) return true;
+    return path.split('/').last.contains('.') ? null : true;
+  }
 }

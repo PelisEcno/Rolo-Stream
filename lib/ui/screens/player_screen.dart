@@ -40,14 +40,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       pluginRegistry.byId(widget.sourceId ?? '') ?? pluginRegistry.active;
   // `warn` deja pasar los avisos de FFmpeg/mpv (hls, tcp, http…) a la consola de depuración.
   late final Player _player = createPremiumPlayer(logLevel: MPVLogLevel.warn);
-  late final VideoController _controller = VideoController(_player);
-  late final StallRecovery _recovery = StallRecovery(
+  late final VideoController _controller = createPremiumController(_player);
+  late final PlaybackWatchdog _watchdog = PlaybackWatchdog(
     _player,
     reopen: (at) async {
-      // Cambiando de servidor: la apertura en curso ya sustituye a la fuente atascada.
-      if (_opening) return;
-      _log.add('[WARN] Buffer vacío: reconectando en ${at.inSeconds}s');
-      await StallRecovery.reopenAt(_player, _media!, at);
+      _log.add('[WARN] El video no avanza: se reabre en ${at.inSeconds}s');
+      await reopenAt(_player, _media!, at);
     },
     onGiveUp: () {
       if (!mounted) return;
@@ -88,10 +86,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _player.state.playing &&
           pos - at > const Duration(seconds: 1)) {
         _errorShownAt = null;
+        _watchdog.begin();
         if (mounted) setState(() => _playError = null);
       }
     });
-    _recovery; // empieza a vigilar el buffer
     _load();
   }
 
@@ -110,6 +108,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _log.add('[WARN] Error transitorio, la reproducción continúa');
         return;
       }
+      // Un servidor que da error no se reintenta: el usuario puede elegir otro.
+      _watchdog.stop();
       setState(() {
         _playError = e;
         _errorShownAt = _player.state.position;
@@ -120,7 +120,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void dispose() {
     _errorTimer?.cancel();
-    _recovery.dispose();
+    _watchdog.dispose();
     _log.dispose();
     _player.dispose();
     super.dispose();
@@ -313,6 +313,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     Future<void> _select(int i) async {
     _errorTimer?.cancel();
     _errorShownAt = null;
+    _watchdog.connecting();
     setState(() {
       _selected = i;
       _opening = true;
@@ -349,9 +350,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _log.add('[PLAY] media_kit open${viaProxy ? ' (vía proxy)' : ''}: '
           '${DebugLog.short(finalUrl.replaceAll(MediaFlowService.apiPassword, '***'))}');
       _media = Media(finalUrl, httpHeaders: viaProxy ? null : video.headers);
+      _watchdog.begin();
       await _player.open(_media!);
     } catch (e) {
       _log.add('[PLAYER] ${DebugLog.short(e.toString(), 300)}');
+      _watchdog.stop();
       if (mounted && _selected == i) setState(() => _playError = e.toString());
     } finally {
       if (mounted && _selected == i) setState(() => _opening = false);
@@ -365,10 +368,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
         fit: StackFit.expand,
         children: [
           PremiumVideo(
-              player: _player,
-              controller: _controller,
-              reconnecting: _recovery.reconnecting),
-          if (_opening) const Center(child: CircularProgressIndicator()),
+            player: _player,
+            controller: _controller,
+            phase: _watchdog.phase,
+            live: false,
+            connectingLabel: 'Conectando al servidor...',
+          ),
           if (_playError != null && !_opening)
             Container(
               color: Colors.black87,

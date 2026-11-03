@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -9,9 +7,8 @@ import '../widgets/premium_player.dart';
 
 /// Reproductor de un canal IPTV. Abre la URL tal cual (HLS, MPEG-TS, MP4…) con `media_kit`.
 ///
-/// En los directos no hay duración: la barra de progreso se oculta y no hay nada que "buscar".
-/// En las películas y series de la lista (`.mkv`, `.mp4`) la barra aparece en cuanto se conoce
-/// la duración.
+/// Los directos no tienen barra de progreso ni se pueden pausar. Las películas y series de la
+/// lista (`.mkv`, `.mp4`) tienen los controles normales: ver [Channel.isLive].
 class IPTVPlayerScreen extends StatefulWidget {
   final Channel channel;
   const IPTVPlayerScreen({super.key, required this.channel});
@@ -22,18 +19,18 @@ class IPTVPlayerScreen extends StatefulWidget {
 
 class _IPTVPlayerScreenState extends State<IPTVPlayerScreen> {
   late final Player _player = createPremiumPlayer();
-  late final VideoController _controller = VideoController(_player);
-  final _subs = <StreamSubscription<dynamic>>[];
-
-  late final StallRecovery _recovery = StallRecovery(
+  late final VideoController _controller = createPremiumController(_player);
+  late final PlaybackWatchdog _watchdog = PlaybackWatchdog(
     _player,
-    reopen: (at) => StallRecovery.reopenAt(_player, _media, at),
+    // En un directo no hay posición a la que volver.
+    reopen: (at) => widget.channel.isLive == true
+        ? _player.open(_media)
+        : reopenAt(_player, _media, at),
     onGiveUp: () {
       if (mounted) setState(() => _error = _friendlyError);
     },
   );
 
-  Timer? _errorTimer;
   String? _error;
 
   Media get _media => Media(widget.channel.url,
@@ -42,48 +39,31 @@ class _IPTVPlayerScreenState extends State<IPTVPlayerScreen> {
   @override
   void initState() {
     super.initState();
-    _subs.add(_player.stream.error.listen(_onError));
-    _recovery; // empieza a vigilar el buffer
     _open();
   }
 
   @override
   void dispose() {
-    _errorTimer?.cancel();
-    for (final s in _subs) {
-      s.cancel();
-    }
-    _recovery.dispose();
+    _watchdog.dispose();
     _player.dispose();
     super.dispose();
   }
 
+  /// Los errores de mpv no se muestran: suelen ser transitorios. Si el canal de verdad no
+  /// arranca, lo dice [PlaybackWatchdog] al agotar los reintentos.
   Future<void> _open() async {
-    _errorTimer?.cancel();
     setState(() => _error = null);
+    _watchdog.begin();
     try {
       await _player.open(_media);
     } catch (_) {
+      _watchdog.stop();
       if (mounted) setState(() => _error = _friendlyError);
     }
   }
 
   static const _friendlyError =
       'No se pudo reproducir este canal. Puede estar caído o no estar disponible ahora.';
-
-  /// mpv emite errores transitorios aunque el video siga: solo se avisa si, pasados 2 s,
-  /// la reproducción no avanza.
-  void _onError(String message) {
-    if (message.isEmpty) return;
-    final posAtError = _player.state.position;
-    _errorTimer?.cancel();
-    _errorTimer = Timer(const Duration(seconds: 2), () {
-      if (!mounted) return;
-      final advanced = _player.state.playing &&
-          _player.state.position - posAtError > const Duration(milliseconds: 500);
-      if (!advanced) setState(() => _error = _friendlyError);
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -112,9 +92,12 @@ class _IPTVPlayerScreenState extends State<IPTVPlayerScreen> {
               fit: StackFit.expand,
               children: [
                 PremiumVideo(
-                    player: _player,
-                    controller: _controller,
-                    reconnecting: _recovery.reconnecting),
+                  player: _player,
+                  controller: _controller,
+                  phase: _watchdog.phase,
+                  live: c.isLive,
+                  connectingLabel: 'Conectando al canal...',
+                ),
                 if (_error != null)
                   Container(
                     color: Colors.black87,
