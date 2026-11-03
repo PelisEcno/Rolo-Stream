@@ -71,6 +71,51 @@ void main() {
     });
   });
 
+  group('bestVariant', () {
+    final master = Uri.parse('http://127.0.0.1:8888/proxy/hls/master.m3u8');
+
+    test('elige la de mayor calidad y resuelve la ruta', () {
+      const text = '#EXTM3U\n'
+          '#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360\nlow.m3u8\n'
+          '#EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=1,BANDWIDTH=5000000,RESOLUTION=1920x1080\nhigh.m3u8\n'
+          '#EXT-X-STREAM-INF:BANDWIDTH=2500000\nmid.m3u8\n';
+      expect(HlsPlaylist.bestVariant(text, master), 'http://127.0.0.1:8888/proxy/hls/high.m3u8');
+    });
+
+    test('no confunde AVERAGE-BANDWIDTH con BANDWIDTH', () {
+      const text = '#EXTM3U\n'
+          '#EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=9000000,BANDWIDTH=1000\na.m3u8\n'
+          '#EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=1,BANDWIDTH=2000\nb.m3u8\n';
+      expect(HlsPlaylist.bestVariant(text, master), endsWith('/b.m3u8'));
+    });
+
+    test('un playlist de medios no tiene variantes', () {
+      expect(HlsPlaylist.bestVariant(playlist(), base), isNull);
+    });
+
+    test('ignora las variantes de solo fotogramas clave', () {
+      const text = '#EXTM3U\n'
+          '#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=9000000,URI="iframes.m3u8"\n'
+          '#EXT-X-STREAM-INF:BANDWIDTH=1000\nreal.m3u8\n';
+      expect(HlsPlaylist.bestVariant(text, master), endsWith('/real.m3u8'));
+    });
+
+    test('con el audio en una pista aparte no se intenta', () {
+      const text = '#EXTM3U\n'
+          '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="es",URI="audio.m3u8"\n'
+          '#EXT-X-STREAM-INF:BANDWIDTH=1000,AUDIO="a"\nv.m3u8\n';
+      expect(HlsPlaylist.bestVariant(text, master), isNull);
+      expect(HlsPlaylist.parse(text, master), isNull);
+    });
+
+    test('un audio incluido en el video no molesta', () {
+      const text = '#EXTM3U\n'
+          '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="es",DEFAULT=YES\n'
+          '#EXT-X-STREAM-INF:BANDWIDTH=1000,AUDIO="a"\nv.m3u8\n';
+      expect(HlsPlaylist.bestVariant(text, master), endsWith('/v.m3u8'));
+    });
+  });
+
   group('windowAt', () {
     late HlsPlaylist p;
     setUp(() => p = HlsPlaylist.parse(playlist(), base)!);

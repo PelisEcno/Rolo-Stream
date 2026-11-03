@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:screen_brightness/screen_brightness.dart';
+import '../../services/hls_window.dart';
 import '../theme/app_theme.dart';
 
 /// Buffer del reproductor: 128 MB de demuxer.
@@ -95,7 +96,11 @@ class PlaybackWatchdog {
     required bool Function() shouldWatch,
     required this.reopen,
     this.onGiveUp,
-    this.attemptTimeouts = const [Duration(seconds: 10), Duration(seconds: 15), Duration(seconds: 20)],
+    this.attemptTimeouts = const [
+      Duration(seconds: 10),
+      Duration(seconds: 15),
+      Duration(seconds: 20)
+    ],
     this.stallTimeout = const Duration(seconds: 12),
   }) : _shouldWatch = shouldWatch {
     _sub = position.listen(_onPosition);
@@ -277,8 +282,7 @@ class _StatusOverlay extends StatelessWidget {
           return StreamBuilder<bool>(
             stream: player.stream.buffering,
             initialData: player.state.buffering,
-            builder: (context, snap) =>
-                snap.data == true ? _spinner() : const SizedBox.shrink(),
+            builder: (context, snap) => snap.data == true ? _spinner() : const SizedBox.shrink(),
           );
         },
       ),
@@ -403,11 +407,9 @@ class QualityButton extends StatelessWidget {
                   dense: true,
                   title: Text(label,
                       style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: selected ? AppColors.primary : null)),
-                  trailing: selected
-                      ? const Icon(Icons.check_rounded, color: AppColors.primary)
-                      : null,
+                          fontWeight: FontWeight.w700, color: selected ? AppColors.primary : null)),
+                  trailing:
+                      selected ? const Icon(Icons.check_rounded, color: AppColors.primary) : null,
                   onTap: () {
                     player.setVideoTrack(track);
                     Navigator.pop(ctx);
@@ -419,8 +421,8 @@ class QualityButton extends StatelessWidget {
                 const Padding(
                   padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
                   child: Text('CALIDAD',
-                      style: TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.8)),
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.8)),
                 ),
                 row('Automática', auto, VideoTrack.auto()),
                 for (final v in variants) row(labelOf(v), !auto && current.id == v.id, v),
@@ -434,19 +436,22 @@ class QualityButton extends StatelessWidget {
 }
 
 /// Barra con el tiempo real del episodio, para cuando el reproductor solo tiene abierto un tramo:
-/// su posición empieza en 0 en [offset] y su duración es la del tramo.
+/// su posición empieza en 0 al inicio del tramo y su duración es la del tramo.
+///
+/// Escucha [window] y lee [currentPosition] por su cuenta, en vez de recibir valores fijos: llega a
+/// los controles por `MaterialVideoControlsTheme`, cuyo `updateShouldNotify` está invertido en
+/// `media_kit` y que en pantalla completa se copia una sola vez al entrar. Con valores fijos, la
+/// barra se queda con el primer tramo aunque se abra otro.
 class TimelineBar extends StatefulWidget {
   final Stream<Duration> position;
-  final Duration initialPosition;
-  final Duration offset;
-  final Duration total;
+  final Duration Function() currentPosition;
+  final ValueListenable<HlsWindow?> window;
   final void Function(Duration) onSeek;
   const TimelineBar({
     super.key,
     required this.position,
-    required this.initialPosition,
-    required this.offset,
-    required this.total,
+    required this.currentPosition,
+    required this.window,
     required this.onSeek,
   });
 
@@ -466,47 +471,53 @@ class _TimelineBarState extends State<TimelineBar> {
 
   @override
   Widget build(BuildContext context) {
-    final max = widget.total.inMilliseconds.toDouble();
-    return StreamBuilder<Duration>(
-      stream: widget.position,
-      initialData: widget.initialPosition,
-      builder: (context, snap) {
-        final real = widget.offset + (snap.data ?? Duration.zero);
-        final value = (_dragging ?? real.inMilliseconds.toDouble()).clamp(0.0, max);
-        return Row(
-          children: [
-            Text(
-              '${TimelineBar.format(Duration(milliseconds: value.round()))} / '
-              '${TimelineBar.format(widget.total)}',
-              style: const TextStyle(color: Colors.white, fontSize: 12),
+    return ValueListenableBuilder<HlsWindow?>(
+      valueListenable: widget.window,
+      builder: (context, window, _) => window == null
+          ? const SizedBox.shrink()
+          : StreamBuilder<Duration>(
+              stream: widget.position,
+              builder: (context, _) => _bar(window, widget.currentPosition()),
             ),
-            Expanded(
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: 2.4,
-                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.4),
-                  overlayShape: SliderComponentShape.noOverlay,
-                  activeTrackColor: AppColors.primary,
-                  thumbColor: AppColors.primary,
-                  inactiveTrackColor: const Color(0x3DFFFFFF),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: Slider(
-                    value: value,
-                    max: max,
-                    onChanged: (v) => setState(() => _dragging = v),
-                    onChangeEnd: (v) {
-                      setState(() => _dragging = null);
-                      widget.onSeek(Duration(milliseconds: v.round()));
-                    },
-                  ),
-                ),
+    );
+  }
+
+  Widget _bar(HlsWindow window, Duration position) {
+    final max = window.total.inMilliseconds.toDouble();
+    final real = window.offset + position;
+    final value = (_dragging ?? real.inMilliseconds.toDouble()).clamp(0.0, max);
+    return Row(
+      children: [
+        Text(
+          '${TimelineBar.format(Duration(milliseconds: value.round()))} / '
+          '${TimelineBar.format(window.total)}',
+          style: const TextStyle(color: Colors.white, fontSize: 12),
+        ),
+        Expanded(
+          child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 2.4,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.4),
+              overlayShape: SliderComponentShape.noOverlay,
+              activeTrackColor: AppColors.primary,
+              thumbColor: AppColors.primary,
+              inactiveTrackColor: const Color(0x3DFFFFFF),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Slider(
+                value: value,
+                max: max,
+                onChanged: (v) => setState(() => _dragging = v),
+                onChangeEnd: (v) {
+                  setState(() => _dragging = null);
+                  widget.onSeek(Duration(milliseconds: v.round()));
+                },
               ),
             ),
-          ],
-        );
-      },
+          ),
+        ),
+      ],
     );
   }
 }
