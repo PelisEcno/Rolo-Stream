@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -11,6 +10,7 @@ import 'package:rolostream/iptv/iptv_service.dart';
 import 'package:rolostream/iptv/m3u_parser.dart';
 import 'package:rolostream/ui/screens/iptv_channel_list_screen.dart';
 import 'package:rolostream/ui/theme/app_theme.dart';
+import 'package:rolostream/ui/widgets/epg_timeline.dart';
 import 'package:rolostream/ui/widgets/premium_player.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -156,7 +156,7 @@ void main() {
   });
 
   group('marca de agua', () {
-    testWidgets('al 40 %, abajo a la derecha y deja pasar los toques', (tester) async {
+    testWidgets('es texto al 30 %, abajo a la derecha, y deja pasar los toques', (tester) async {
       var taps = 0;
       await tester.pumpWidget(MaterialApp(
         home: SizedBox.expand(
@@ -167,19 +167,70 @@ void main() {
         ),
       ));
 
-      expect(tester.widget<Opacity>(find.byType(Opacity)).opacity, 0.4);
-      final screen = tester.getRect(find.byType(Stack).first);
-      final logo = tester.getRect(find.byType(Image));
-      expect(screen.right - logo.right, 12);
-      expect(screen.bottom - logo.bottom, 8);
+      final text = tester.widget<Text>(find.text('ROLOSTREAM'));
+      expect(text.style!.color!.a, closeTo(0.3, 0.01));
+      expect(find.byType(Image), findsNothing);
 
-      await tester.tapAt(logo.center);
+      final screen = tester.getRect(find.byType(Stack).first);
+      final rect = tester.getRect(find.text('ROLOSTREAM'));
+      expect(screen.right - rect.right, 12);
+      expect(screen.bottom - rect.bottom, 4);
+      // El icono de pantalla completa empieza 16 px por encima del borde.
+      expect(screen.bottom - rect.top, lessThanOrEqualTo(16));
+
+      await tester.tapAt(rect.center);
       expect(taps, 1);
     });
+  });
 
-    testWidgets('el logo está registrado en los assets', (tester) async {
-      final bytes = await tester.runAsync(() => rootBundle.load('assets/images/rolostream_logo.png'));
-      expect(bytes!.lengthInBytes, greaterThan(0));
+  group('audio en directo', () {
+    const a1 = AudioTrack('1', null, null);
+    const a2 = AudioTrack('2', null, null);
+
+    test('con auto fija la primera pista real', () {
+      final t = Tracks(audio: [AudioTrack.auto(), AudioTrack.no(), a1, a2]);
+      expect(liveAudioTrackToForce(t, Track(audio: AudioTrack.auto()))?.id, '1');
+    });
+
+    test('respeta una pista ya elegida y no hace nada sin pistas', () {
+      final t = Tracks(audio: [AudioTrack.auto(), AudioTrack.no(), a1, a2]);
+      expect(liveAudioTrackToForce(t, const Track(audio: a2)), isNull);
+      expect(
+          liveAudioTrackToForce(Tracks(audio: [AudioTrack.auto(), AudioTrack.no()]),
+              Track(audio: AudioTrack.auto())),
+          isNull);
+    });
+  });
+
+  group('línea de tiempo de la guía', () {
+    final start = DateTime(2026, 11, 2, 20);
+    final end = start.add(const Duration(hours: 6));
+
+    test('la ventana empieza media hora antes de la franja actual', () {
+      expect(EpgTimeline.windowStart(DateTime(2026, 11, 2, 20, 45)), DateTime(2026, 11, 2, 20));
+      expect(EpgTimeline.windowStart(DateTime(2026, 11, 2, 20, 10)), DateTime(2026, 11, 2, 19, 30));
+    });
+
+    test('coloca el programa según su hora y duración', () {
+      final b = EpgTimeline.blockFor(
+          EPGProgram(titulo: 'x', inicio: start.add(const Duration(minutes: 30)), fin: start.add(const Duration(minutes: 90))),
+          start,
+          end)!;
+      expect(b.left, 30 * EpgTimeline.pxPerMinute);
+      expect(b.width, 60 * EpgTimeline.pxPerMinute);
+    });
+
+    test('recorta lo que sobresale y descarta lo que queda fuera', () {
+      final b = EpgTimeline.blockFor(
+          EPGProgram(titulo: 'x', inicio: start.subtract(const Duration(hours: 1)), fin: start.add(const Duration(minutes: 30))),
+          start,
+          end)!;
+      expect(b.left, 0);
+      expect(b.width, 30 * EpgTimeline.pxPerMinute);
+      expect(
+          EpgTimeline.blockFor(EPGProgram(titulo: 'x', inicio: start.subtract(const Duration(hours: 2)), fin: start), start, end),
+          isNull);
+      expect(EpgTimeline.blockFor(EPGProgram(titulo: 'x', inicio: end, fin: end.add(const Duration(hours: 1))), start, end), isNull);
     });
   });
 
@@ -467,7 +518,7 @@ void main() {
 
       expect(find.text('Deportes HD'), findsOneWidget);
       expect(find.text('Partido de Fútbol'), findsOneWidget);
-      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      expect(find.byType(FractionallySizedBox), findsOneWidget); // lo ya emitido
       expect(find.text('Canal sin guía'), findsNothing);
     });
   });

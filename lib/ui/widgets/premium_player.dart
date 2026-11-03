@@ -45,9 +45,8 @@ Player createPremiumPlayer({MPVLogLevel logLevel = MPVLogLevel.error}) {
       // Si se vacía el buffer, mpv espera a tener 3 s antes de reanudar en vez de tartamudear.
       'cache-pause': 'yes',
       'cache-pause-wait': '3',
-      // Por defecto mpv espera 60 s a un servidor que no responde y FFmpeg analiza 5 s el stream.
+      // Por defecto mpv espera 60 s a un servidor que no responde.
       'network-timeout': '10',
-      'demuxer-lavf-analyzeduration': '3',
       'demuxer-lavf-o': _lavfReconnect,
       'stream-lavf-o': _lavfReconnect,
     };
@@ -208,22 +207,24 @@ Future<void> reopenAt(Player player, Media media, Duration resumeAt) async {
   if (known > Duration.zero) await player.seek(resumeAt);
 }
 
-/// Logo de RoloStream en la esquina inferior derecha, al 40 % y sin capturar toques.
+/// Marca discreta en la esquina inferior derecha. Queda por debajo del botón de pantalla completa
+/// y no captura toques.
 class PlayerWatermark extends StatelessWidget {
   const PlayerWatermark({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Positioned(
+    return const Positioned(
       right: 12,
-      bottom: 8,
+      bottom: 4,
       child: IgnorePointer(
-        child: Opacity(
-          opacity: 0.4,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: Image.asset('assets/images/rolostream_logo.png',
-                width: 30, height: 30, filterQuality: FilterQuality.medium),
+        child: Text(
+          'ROLOSTREAM',
+          style: TextStyle(
+            color: Color(0x4DFFFFFF),
+            fontSize: 9,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 2,
           ),
         ),
       ),
@@ -275,6 +276,19 @@ class _StatusOverlay extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Pista de audio que hay que fijar en un directo, o `null` si no hace falta.
+///
+/// Con `auto`, mpv puede quedarse sin audio en canales cuyas pistas no declaran idioma ni pista
+/// por defecto. Se fija la primera real; si ya hay una elegida se respeta.
+AudioTrack? liveAudioTrackToForce(Tracks tracks, Track current) {
+  final id = current.audio.id;
+  if (id != 'auto' && id != 'no') return null;
+  for (final t in tracks.audio) {
+    if (t.id != 'auto' && t.id != 'no') return t;
+  }
+  return null;
 }
 
 /// Botón central de un directo: solo aparece si está parado, para volver a reproducir.

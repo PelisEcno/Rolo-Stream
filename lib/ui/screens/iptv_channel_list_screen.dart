@@ -7,9 +7,10 @@ import '../../iptv/iptv_service.dart';
 import '../../iptv/m3u_parser.dart';
 import '../theme/app_theme.dart';
 import '../widgets/anime_card.dart';
+import '../widgets/epg_timeline.dart';
 import 'iptv_player_screen.dart';
 
-/// Canales de una lista, agrupados por `group-title`, con búsqueda.
+/// Canales de una lista: cuadrícula por `group-title`, búsqueda y guía de programación.
 class IPTVChannelListScreen extends StatefulWidget {
   final IPTVPlaylist playlist;
   const IPTVChannelListScreen({super.key, required this.playlist});
@@ -68,8 +69,9 @@ class _IPTVChannelListScreenState extends State<IPTVChannelListScreen> {
           }
           if (snap.hasError) {
             return ErrorState(
-              title: 'No se pudo cargar la lista',
-              detail: snap.error.toString(),
+              error: snap.error,
+              // Estos ya dicen qué pasó con la lista (usuario y contraseña, URL…).
+              message: snap.error is IPTVException ? snap.error.toString() : null,
               onRetry: _reload,
             );
           }
@@ -93,9 +95,10 @@ class _ChannelBrowser extends StatefulWidget {
 
 class _ChannelBrowserState extends State<_ChannelBrowser> {
   late final Map<String, List<Channel>> _groups = groupChannels(widget.channels);
-  final _expanded = <String>{};
+  late String _group = _groups.keys.first;
   bool _guide = false;
   final _search = TextEditingController();
+  final _grid = ScrollController();
   Timer? _debounce;
   String _query = '';
   Timer? _clock;
@@ -114,6 +117,7 @@ class _ChannelBrowserState extends State<_ChannelBrowser> {
     _clock?.cancel();
     _debounce?.cancel();
     _search.dispose();
+    _grid.dispose();
     super.dispose();
   }
 
@@ -124,22 +128,15 @@ class _ChannelBrowserState extends State<_ChannelBrowser> {
     });
   }
 
-  void _toggle(String group) =>
-      setState(() => _expanded.contains(group) ? _expanded.remove(group) : _expanded.add(group));
+  void _selectGroup(String group) {
+    setState(() => _group = group);
+    if (_grid.hasClients) _grid.jumpTo(0);
+  }
 
   void _play(Channel c) => Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => IPTVPlayerScreen(channel: c)),
       );
-
-  /// Cabeceras de grupo y, debajo de cada grupo abierto, sus canales. La lista es perezosa
-  /// (`ListView.builder`), así que un grupo de miles de canales no cuesta nada hasta que se mira.
-  List<Object> _grouped() => [
-        for (final e in _groups.entries) ...[
-          e.key,
-          if (_expanded.contains(e.key)) ...e.value,
-        ],
-      ];
 
   List<Channel> _searchResults() {
     final out = <Channel>[];
@@ -164,6 +161,42 @@ class _ChannelBrowserState extends State<_ChannelBrowser> {
     return out;
   }
 
+  Widget _guideView() {
+    final channels = _guideChannels();
+    if (channels.isNotEmpty) return EpgTimeline(channels: channels, onPlay: _play);
+    final hasData = EPGService.instance.hasData;
+    return EmptyState(
+      icon: Icons.calendar_view_day_rounded,
+      title: hasData ? 'Sin resultados' : 'Aún no hay guía de programación',
+      subtitle: hasData
+          ? 'Prueba con otro nombre.'
+          : 'Cuando la lista incluya datos de programación, aparecerán aquí.',
+    );
+  }
+
+  Widget _gridView(List<Channel> items, {required bool searching}) {
+    if (items.isEmpty) {
+      return const EmptyState(
+          icon: Icons.search_off_rounded,
+          title: 'Sin resultados',
+          subtitle: 'Prueba con otro nombre.');
+    }
+    // Perezosa: un grupo de miles de canales solo cuesta lo que se ve en pantalla.
+    return GridView.builder(
+      controller: _grid,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 128,
+        mainAxisExtent: 172,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 12,
+      ),
+      itemCount: items.length,
+      itemBuilder: (_, i) =>
+          _ChannelTile(channel: items[i], showGroup: searching, onTap: () => _play(items[i])),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // La guía se rellena desde fuera (XMLTV): al cambiar, se repinta la lista.
@@ -175,12 +208,12 @@ class _ChannelBrowserState extends State<_ChannelBrowser> {
 
   Widget _buildBody(BuildContext context) {
     final searching = _query.isNotEmpty;
-    final items = _guide ? const <Object>[] : (searching ? _searchResults() : _grouped());
+    final results = !_guide && searching ? _searchResults() : const <Channel>[];
 
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
+          padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
           child: Row(
             children: [
               Expanded(
@@ -205,209 +238,129 @@ class _ChannelBrowserState extends State<_ChannelBrowser> {
               ),
               IconButton(
                 tooltip: _guide ? 'Ver canales' : 'Guía de programación',
-                icon: Icon(_guide ? Icons.view_list_rounded : Icons.calendar_view_day_rounded,
+                icon: Icon(_guide ? Icons.grid_view_rounded : Icons.calendar_view_day_rounded,
                     color: _guide ? AppColors.primary : AppColors.textMuted),
                 onPressed: () => setState(() => _guide = !_guide),
               ),
             ],
           ),
         ),
-        if (!_guide && searching && items.length >= _maxSearchResults)
+        if (!_guide && !searching)
+          _GroupTabs(groups: _groups, selected: _group, onSelected: _selectGroup),
+        if (!_guide && searching && results.length >= _maxSearchResults)
           const Padding(
-            padding: EdgeInsets.only(bottom: 4),
+            padding: EdgeInsets.only(top: 6),
             child: Text('Mostrando los primeros $_maxSearchResults resultados. Afina la búsqueda.',
                 style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
           ),
         Expanded(
           child: _guide
-              ? _GuideView(channels: _guideChannels(), onPlay: _play)
-              : items.isEmpty
-              ? const EmptyState(
-                  icon: Icons.search_off_rounded,
-                  title: 'Sin resultados',
-                  subtitle: 'Prueba con otro nombre.')
-              : ListView.builder(
-                  itemCount: items.length,
-                  itemBuilder: (context, i) {
-                    final item = items[i];
-                    if (item is String) {
-                      return _GroupHeader(
-                        name: item,
-                        count: _groups[item]!.length,
-                        expanded: _expanded.contains(item),
-                        onTap: () => _toggle(item),
-                      );
-                    }
-                    final c = item as Channel;
-                    return _ChannelTile(channel: c, showGroup: searching, onTap: () => _play(c));
-                  },
-                ),
+              ? _guideView()
+              : _gridView(searching ? results : _groups[_group]!, searching: searching),
         ),
       ],
     );
   }
 }
 
-/// Cabecera plegable de un grupo (hace el papel de un `ExpansionTile`).
-class _GroupHeader extends StatelessWidget {
-  final String name;
-  final int count;
-  final bool expanded;
-  final VoidCallback onTap;
-  const _GroupHeader(
-      {required this.name, required this.count, required this.expanded, required this.onTap});
+/// Pestañas de grupos, con el subrayado del grupo activo.
+class _GroupTabs extends StatelessWidget {
+  final Map<String, List<Channel>> groups;
+  final String selected;
+  final void Function(String) onSelected;
+  const _GroupTabs({required this.groups, required this.selected, required this.onSelected});
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.surface,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: AppColors.divider)),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: expanded ? AppColors.primary : null)),
+    final names = groups.keys.toList(growable: false);
+    return Container(
+      height: 42,
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: AppColors.divider)),
+      ),
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        itemCount: names.length,
+        itemBuilder: (_, i) {
+          final name = names[i];
+          final active = name == selected;
+          return InkWell(
+            onTap: () => onSelected(name),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                      width: 2, color: active ? AppColors.primary : Colors.transparent),
+                ),
               ),
-              const SizedBox(width: 8),
-              Text('$count', style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
-              const SizedBox(width: 4),
-              Icon(expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
-                  color: AppColors.textMuted),
-            ],
-          ),
-        ),
+              child: Row(
+                children: [
+                  Text(name,
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: active ? Colors.white : AppColors.textMuted)),
+                  const SizedBox(width: 5),
+                  Text('${groups[name]!.length}',
+                      style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
 }
 
+/// Logo del canal con su nombre y, si los hay, grupo y "Ahora" / "Después".
 class _ChannelTile extends StatelessWidget {
   final Channel channel;
   final bool showGroup;
   final VoidCallback onTap;
   const _ChannelTile({required this.channel, required this.showGroup, required this.onTap});
 
-  /// Grupo (en búsquedas) y, si el canal tiene guía, "Ahora" y "Después".
-  Widget? _subtitle() {
+  @override
+  Widget build(BuildContext context) {
     final nn = EPGService.instance.nowNextFor(channel);
-    if (!showGroup && nn == null) return null;
-    const muted = TextStyle(color: AppColors.textMuted, fontSize: 12);
-    Widget line(String text, [TextStyle style = muted]) =>
-        Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
     final ahora = nn?.ahora;
     final despues = nn?.despues;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (showGroup) line(channel.grupo),
-        if (ahora != null)
-          line('Ahora: ${ahora.titulo}',
-              const TextStyle(color: AppColors.primary, fontSize: 12, fontWeight: FontWeight.w700)),
-        if (despues != null) line('Después: ${despues.titulo}'),
-      ],
-    );
-  }
+    const muted = TextStyle(color: AppColors.textMuted, fontSize: 11);
+    Widget line(String text, [TextStyle style = muted]) =>
+        Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
 
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      dense: true,
+    return PressScale(
       onTap: onTap,
-      contentPadding: const EdgeInsets.fromLTRB(24, 2, 12, 2),
-      leading: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadius.small),
-        child: Container(
-          width: 44,
-          height: 44,
-          color: AppColors.surfaceHigh,
-          child: channel.logo == null
-              ? const Icon(Icons.tv_rounded, color: AppColors.textMuted)
-              : PosterImage(url: channel.logo!, fit: BoxFit.contain),
-        ),
-      ),
-      title: Text(channel.nombre, maxLines: 2, overflow: TextOverflow.ellipsis),
-      subtitle: _subtitle(),
-      trailing: const Icon(Icons.play_arrow_rounded, color: AppColors.primary),
-    );
-  }
-}
-
-/// Guía de programación: una fila por canal con lo que emite ahora (con su progreso) y lo siguiente.
-class _GuideView extends StatelessWidget {
-  final List<Channel> channels;
-  final void Function(Channel) onPlay;
-  const _GuideView({required this.channels, required this.onPlay});
-
-  @override
-  Widget build(BuildContext context) {
-    if (channels.isEmpty) {
-      final hasData = EPGService.instance.hasData;
-      return EmptyState(
-        icon: Icons.calendar_view_day_rounded,
-        title: hasData ? 'Sin resultados' : 'Aún no hay guía de programación',
-        subtitle: hasData
-            ? 'Prueba con otro nombre.'
-            : 'Cuando la lista incluya datos de programación, aparecerán aquí.',
-      );
-    }
-    final now = DateTime.now();
-    return ListView.separated(
-      itemCount: channels.length,
-      separatorBuilder: (_, __) => const Divider(height: 1, color: AppColors.divider),
-      itemBuilder: (context, i) {
-        final c = channels[i];
-        final nn = EPGService.instance.nowNextFor(c, now: now);
-        final ahora = nn?.ahora;
-        final despues = nn?.despues;
-        return InkWell(
-          onTap: () => onPlay(c),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(c.nombre,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w800)),
-                const SizedBox(height: 6),
-                if (ahora != null) ...[
-                  Text('Ahora · ${ahora.rango}',
-                      style: const TextStyle(
-                          color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w700)),
-                  Text(ahora.titulo, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 4),
-                  LinearProgressIndicator(
-                    value: ahora.progressAt(now),
-                    minHeight: 3,
-                    color: AppColors.primary,
-                    backgroundColor: AppColors.surfaceHigh,
-                  ),
-                ],
-                if (despues != null) ...[
-                  const SizedBox(height: 6),
-                  Text('Después · ${despues.rango}',
-                      style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
-                  Text(despues.titulo,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: AppColors.textMuted)),
-                ],
-              ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: RoundedPoster(
+              child: Container(
+                width: double.infinity,
+                color: AppColors.surface,
+                padding: const EdgeInsets.all(10),
+                child: channel.logo == null
+                    ? const Icon(Icons.live_tv_rounded, size: 30, color: AppColors.textMuted)
+                    : PosterImage(url: channel.logo!, fit: BoxFit.contain),
+              ),
             ),
           ),
-        );
-      },
+          const SizedBox(height: 6),
+          Text(channel.nombre,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, height: 1.2)),
+          if (showGroup) line(channel.grupo),
+          if (ahora != null)
+            line('Ahora: ${ahora.titulo}',
+                const TextStyle(color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w700)),
+          if (despues != null) line('Después: ${despues.titulo}'),
+        ],
+      ),
     );
   }
 }

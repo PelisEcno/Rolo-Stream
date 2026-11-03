@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../theme/app_theme.dart';
 
 /// Avatares disponibles para un perfil. Se guarda el índice, así que solo se añaden al final.
 const kProfileAvatars = <({IconData icon, Color from, Color to})>[
@@ -25,8 +24,7 @@ class ProfileAvatar extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(size * 0.18),
-        boxShadow: AppShadows.soft,
+        borderRadius: BorderRadius.circular(size * 0.12),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,

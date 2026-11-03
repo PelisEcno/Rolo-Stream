@@ -34,6 +34,10 @@ import Flutter
                 // Devolvemos el puerto (8888) para que Dart sepa dónde conectar
                 result(8888)
                 
+            case "restartProxy":
+                MediaFlowBridge.shared.restart()
+                result(8888)
+
             case "stopProxy":
                 MediaFlowBridge.shared.stop()
                 result(nil)

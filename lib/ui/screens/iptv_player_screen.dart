@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -32,6 +34,7 @@ class _IPTVPlayerScreenState extends State<IPTVPlayerScreen> {
   );
 
   String? _error;
+  StreamSubscription<Tracks>? _tracksSub;
 
   Media get _media => Media(widget.channel.url,
       httpHeaders: widget.channel.headers.isEmpty ? null : widget.channel.headers);
@@ -39,14 +42,24 @@ class _IPTVPlayerScreenState extends State<IPTVPlayerScreen> {
   @override
   void initState() {
     super.initState();
+    _tracksSub = _player.stream.tracks.listen(_ensureLiveAudio);
     _open();
   }
 
   @override
   void dispose() {
+    _tracksSub?.cancel();
     _watchdog.dispose();
     _player.dispose();
     super.dispose();
+  }
+
+  /// En un directo se fija la pista de audio en cuanto mpv conoce las pistas (también al reabrir).
+  void _ensureLiveAudio(Tracks tracks) {
+    final live = widget.channel.isLive ?? (_player.state.duration == Duration.zero);
+    if (!live) return;
+    final track = liveAudioTrackToForce(tracks, _player.state.track);
+    if (track != null) _player.setAudioTrack(track);
   }
 
   /// Los errores de mpv no se muestran: suelen ser transitorios. Si el canal de verdad no

@@ -61,6 +61,13 @@ class ProxyManager(private val context: Context) {
         }
     }
 
+    /// El proceso puede seguir vivo pero sin responder en el puerto: se mata y se lanza otro.
+    fun restart() {
+        stop()
+        Thread.sleep(400) // que el sistema libere el puerto
+        start()
+    }
+
     fun stop() {
         try {
             process?.destroy()

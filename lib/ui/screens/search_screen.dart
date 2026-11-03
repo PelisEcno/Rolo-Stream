@@ -58,7 +58,7 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget _body() {
     if (_loading) return const GridSkeleton();
     if (_error != null) {
-      return ErrorState(title: 'No se pudo buscar', detail: _error, onRetry: _search);
+      return ErrorState(error: _error, onRetry: _search);
     }
     if (!_searched) {
       return const EmptyState(

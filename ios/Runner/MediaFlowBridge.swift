@@ -28,6 +28,10 @@ class MediaFlowBridge {
                 // Devolvemos el puerto en el que escucha (8888)
                 result(8888)
 
+            case "restartProxy":
+                self.restart()
+                result(8888)
+
             case "stopProxy":
                 self.stop()
                 result(nil)
@@ -121,10 +125,16 @@ class MediaFlowBridge {
         } else {
             NSLog("[MediaFlow] ❌ Error arrancando server: \(status.rawValue)")
             mediaflow_server_destroy(serverPtr)
-            self.showAlert(
-                title: "❌ Proxy NO arrancó",
-                message: "Error code: \(status.rawValue)"
-            )
+        }
+    }
+
+    /// Reinicia el proxy aunque `mediaflow_server_is_running` diga que sigue activo: al suspender
+    /// la app iOS se lleva el socket, pero ese flag sigue en `true`.
+    func restart() {
+        stop()
+        // Se da un momento al sistema para liberar el puerto.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.start()
         }
     }
 
@@ -138,24 +148,6 @@ class MediaFlowBridge {
     }
 
     // MARK: - Helpers
-
-    private func showAlert(title: String, message: String) {
-        DispatchQueue.main.async {
-            guard let window = UIApplication.shared.windows.first,
-                  let rootVC = window.rootViewController else {
-                NSLog("[MediaFlow] ⚠️ No hay rootViewController")
-                return
-            }
-
-            let alert = UIAlertController(
-                title: title,
-                message: message,
-                preferredStyle: .alert
-            )
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            rootVC.present(alert, animated: true)
-        }
-    }
 
     /// Test genérico de extracción (no hardcodeado).
     private func testExtraction(completion: @escaping (Bool, String) -> Void) {

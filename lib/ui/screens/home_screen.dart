@@ -164,10 +164,7 @@ class _HeroSection extends StatelessWidget {
         if (snap.hasError) {
           return SizedBox(
             height: 320,
-            child: ErrorState(
-                title: 'No se pudo cargar el catálogo',
-                detail: snap.error.toString(),
-                onRetry: onRetry),
+            child: ErrorState(error: snap.error, onRetry: onRetry),
           );
         }
         final series = snap.data ?? const <RecentSerie>[];
@@ -187,7 +184,7 @@ class _HeroSection extends StatelessWidget {
                     colors: [
                       Color(0xB3000000),
                       Colors.transparent,
-                      Color(0x99060608),
+                      Color(0x990A0A0A),
                       AppColors.background,
                     ],
                     stops: [0, 0.3, 0.75, 1],
@@ -247,7 +244,7 @@ class _ContinueWatchingSection extends StatelessWidget {
           title: 'Seguir viendo',
           count: items.length,
           itemWidth: 208,
-          height: 170,
+          height: 117,
           builder: (i) => _ContinueCard(progress: items[i], onTap: () => onOpen(items[i])),
         );
       },
@@ -262,47 +259,86 @@ class _ContinueCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return _WideCard(
+      imagen: progress.imagen,
+      etiqueta: episodeLabel(progress.numero),
+      titulo: progress.titulo,
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          RoundedPoster(
-            child: AspectRatio(
-              aspectRatio: 16 / 9,
-              child: Stack(
-                fit: StackFit.expand,
+      progreso: progress.fraction,
+    );
+  }
+}
+
+/// Tarjeta 16:9 con el texto sobre el degradado.
+class _WideCard extends StatelessWidget {
+  final String imagen;
+  final String? etiqueta;
+  final String titulo;
+  final String fecha;
+  final double? progreso;
+  final VoidCallback onTap;
+  const _WideCard({
+    required this.imagen,
+    required this.titulo,
+    required this.onTap,
+    this.etiqueta,
+    this.fecha = '',
+    this.progreso,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return PressScale(
+      onTap: onTap,
+      child: RoundedPoster(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ParallaxImage(url: imagen),
+            const PosterScrim(),
+            if (fecha.isNotEmpty)
+              Positioned(
+                right: 6,
+                top: 6,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  color: Colors.black87,
+                  child: Text(fecha,
+                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            Positioned(
+              left: 8,
+              right: 8,
+              bottom: progreso == null ? 7 : 10,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  PosterImage(url: progress.imagen),
-                  Container(color: Colors.black26),
-                  const Center(
-                      child: Icon(Icons.play_circle_outline_rounded,
-                          size: 36, color: Colors.white)),
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: LinearProgressIndicator(
-                      value: progress.fraction,
-                      minHeight: 4,
-                      color: AppColors.primary,
-                      backgroundColor: Colors.white24,
-                    ),
-                  ),
+                  if (etiqueta != null)
+                    Text(etiqueta!,
+                        style: const TextStyle(
+                            color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w800)),
+                  Text(titulo,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
                 ],
               ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(episodeLabel(progress.numero),
-              style: const TextStyle(
-                  color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w800)),
-          Text(progress.titulo,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, height: 1.25)),
-        ],
+            if (progreso != null)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: LinearProgressIndicator(
+                  value: progreso,
+                  minHeight: 3,
+                  color: AppColors.primary,
+                  backgroundColor: Colors.white24,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -334,10 +370,7 @@ class _RecentEpisodesSection extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const _SectionTitle('Añadidos recientemente'),
-              ErrorState(
-                  title: 'No se pudieron cargar los episodios',
-                  detail: snap.error.toString(),
-                  onRetry: onRetry),
+              ErrorState(error: snap.error, onRetry: onRetry),
             ],
           );
         }
@@ -348,7 +381,7 @@ class _RecentEpisodesSection extends StatelessWidget {
           count: eps.length,
           loading: !done,
           itemWidth: _itemWidth,
-          height: 170,
+          height: 117,
           builder: (i) => _EpisodeCard(
             ep: eps[i],
             numero: source.parseEpisodeUrl(eps[i].url)?.numero,
@@ -368,58 +401,12 @@ class _EpisodeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return _WideCard(
+      imagen: ep.imagen,
+      etiqueta: numero == null ? null : episodeLabel(numero!),
+      titulo: ep.titulo,
+      fecha: ep.fecha,
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          RoundedPoster(
-            child: AspectRatio(
-              aspectRatio: 16 / 9,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  PosterImage(url: ep.imagen),
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.center,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.transparent, Color(0xB3000000)],
-                      ),
-                    ),
-                  ),
-                  const Center(
-                      child: Icon(Icons.play_circle_outline_rounded,
-                          size: 36, color: Colors.white70)),
-                  if (ep.fecha.isNotEmpty)
-                    Positioned(
-                      right: 6,
-                      bottom: 6,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                        decoration: BoxDecoration(
-                            color: Colors.black87, borderRadius: BorderRadius.circular(2)),
-                        child: Text(ep.fecha,
-                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700)),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          if (numero != null)
-            Text(episodeLabel(numero!),
-                style: const TextStyle(
-                    color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w800)),
-          Text(ep.titulo,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, height: 1.25)),
-        ],
-      ),
     );
   }
 }
@@ -453,9 +440,9 @@ class _RecentSeriesSection extends StatelessWidget {
               sliver: SliverGrid.builder(
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 3,
-                  childAspectRatio: 0.5,
+                  childAspectRatio: 2 / 3,
                   crossAxisSpacing: 10,
-                  mainAxisSpacing: 16,
+                  mainAxisSpacing: 10,
                 ),
                 itemCount: done ? series.length : 6,
                 itemBuilder: (_, i) => done
@@ -464,7 +451,9 @@ class _RecentSeriesSection extends StatelessWidget {
                         imagen: series[i].imagen,
                         onTap: () => onOpen(series[i]),
                       )
-                    : const DecoratedBox(decoration: BoxDecoration(color: AppColors.surface)),
+                    : const DecoratedBox(
+                        decoration:
+                            BoxDecoration(color: AppColors.surface, borderRadius: AppRadius.cardAll)),
               ),
             ),
           ],

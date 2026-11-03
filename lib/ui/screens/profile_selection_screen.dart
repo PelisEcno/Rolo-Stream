@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/profile_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/anime_card.dart';
 import '../widgets/profile_avatar.dart';
 
 /// "¿Quién está viendo?": elegir, crear (hasta 4) y administrar perfiles.
@@ -27,6 +28,9 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen> {
           listenable: _service,
           builder: (context, _) {
             final profiles = _service.profiles;
+            // Dos por fila, y grandes: son lo único que hay que mirar en esta pantalla.
+            final width = MediaQuery.sizeOf(context).width;
+            final size = ((width.clamp(0.0, 560.0) - 48 - 24) / 2).clamp(96.0, 180.0);
             return Center(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(24),
@@ -36,7 +40,7 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen> {
                     Text(_managing ? 'Administrar perfiles' : '¿Quién está viendo?',
                         textAlign: TextAlign.center,
                         style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 36),
                     Wrap(
                       alignment: WrapAlignment.center,
                       spacing: 20,
@@ -45,22 +49,25 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen> {
                         for (final p in profiles)
                           _ProfileTile(
                             nombre: p.nombre,
-                            avatar: ProfileAvatar(avatar: p.avatar),
+                            size: size,
+                            avatar: ProfileAvatar(avatar: p.avatar, size: size),
                             editing: _managing,
                             onTap: () => _managing ? _edit(p) : _service.select(p),
                           ),
                         if (_service.canAdd && !_managing)
                           _ProfileTile(
                             nombre: 'Añadir perfil',
+                            size: size,
                             avatar: Container(
-                              width: 96,
-                              height: 96,
+                              width: size,
+                              height: size,
                               decoration: BoxDecoration(
-                                color: AppColors.surfaceHigh,
-                                borderRadius: BorderRadius.circular(96 * 0.18),
+                                color: AppColors.surface,
+                                borderRadius: BorderRadius.circular(size * 0.12),
+                                border: Border.all(color: AppColors.divider),
                               ),
-                              child: const Icon(Icons.add_rounded,
-                                  size: 44, color: AppColors.textMuted),
+                              child: Icon(Icons.add_rounded,
+                                  size: size * 0.36, color: AppColors.textMuted),
                             ),
                             onTap: _edit,
                           ),
@@ -95,16 +102,22 @@ class _ProfileTile extends StatelessWidget {
   final Widget avatar;
   final VoidCallback onTap;
   final bool editing;
-  const _ProfileTile(
-      {required this.nombre, required this.avatar, required this.onTap, this.editing = false});
+  final double size;
+  const _ProfileTile({
+    required this.nombre,
+    required this.avatar,
+    required this.onTap,
+    required this.size,
+    this.editing = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return PressScale(
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
+      hoverScale: 1.06,
       child: SizedBox(
-        width: 112,
+        width: size,
         child: Column(
           children: [
             Stack(
@@ -113,11 +126,11 @@ class _ProfileTile extends StatelessWidget {
                 avatar,
                 if (editing)
                   Container(
-                    width: 96,
-                    height: 96,
+                    width: size,
+                    height: size,
                     decoration: BoxDecoration(
                       color: Colors.black54,
-                      borderRadius: BorderRadius.circular(96 * 0.18),
+                      borderRadius: BorderRadius.circular(size * 0.12),
                     ),
                     child: const Icon(Icons.edit_rounded, color: Colors.white),
                   ),
@@ -217,7 +230,7 @@ class _ProfileEditorState extends State<_ProfileEditor> {
                         child: Container(
                           padding: const EdgeInsets.all(3),
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(9),
                             border: Border.all(
                                 width: 2,
                                 color: i == _avatar ? AppColors.primary : Colors.transparent),

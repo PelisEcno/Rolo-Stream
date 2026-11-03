@@ -244,7 +244,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
   Widget _results() {
     if (_items.isEmpty) {
       if (_error != null) {
-        return ErrorState(title: 'No se pudo cargar', detail: _error, onRetry: _loadNext);
+        return ErrorState(error: _error, onRetry: _loadNext);
       }
       if (_loading || _hasMore) return const GridSkeleton();
       return const EmptyState(
@@ -261,9 +261,9 @@ class _ExploreScreenState extends State<ExploreScreen> {
           sliver: SliverGrid.builder(
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 3,
-              childAspectRatio: 0.5,
+              childAspectRatio: 2 / 3,
               crossAxisSpacing: 10,
-              mainAxisSpacing: 16,
+              mainAxisSpacing: 10,
             ),
             itemCount: _items.length,
             itemBuilder: (_, i) => CatalogCard(
@@ -286,17 +286,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
   }
 
   Widget _footer() {
-    if (_error != null) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 24),
-        child: Column(
-          children: [
-            const Text('No se pudo cargar más', style: TextStyle(color: AppColors.textMuted)),
-            TextButton(onPressed: _loadNext, child: const Text('REINTENTAR')),
-          ],
-        ),
-      );
-    }
+    if (_error != null) return ErrorState(error: _error, onRetry: _loadNext);
     if (_loading) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 24),

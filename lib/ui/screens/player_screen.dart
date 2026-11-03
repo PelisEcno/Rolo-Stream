@@ -7,6 +7,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:rolostream_core/rolostream_core.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../services/app_error.dart';
 import '../../services/mediaflow_service.dart';
 import '../../services/source_registry.dart';
 import '../../services/watch_progress_service.dart';
@@ -236,25 +237,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   /// Mensaje corto para el usuario; el error crudo queda en la consola de depuración.
-  String _friendlyPlayerError(String raw) {
-    final e = raw.toLowerCase();
-    if (e.contains('tcp') ||
-        e.contains('ffurl_read') ||
-        e.contains('connection') ||
-        e.contains('timed out') ||
-        e.contains('timeout') ||
-        e.contains('network') ||
-        e.contains('failed to open')) {
-      return 'Error de conexión con el servidor. Intenta con otro servidor.';
-    }
-    if (e.contains('403') || e.contains('401') || e.contains('forbidden')) {
-      return 'El servidor rechazó la conexión. Intenta con otro servidor.';
-    }
-    if (e.contains('format') || e.contains('codec') || e.contains('demuxer')) {
-      return 'Formato de video no compatible. Intenta con otro servidor.';
-    }
-    return 'No se pudo cargar el video. Intenta con otro servidor.';
-  }
+  String _friendlyPlayerError(String raw) => AppError.from(raw).message;
 
   /// Obtiene la URL real del video y los headers que el servidor exige
   /// (Referer, User-Agent) a través del proxy.
@@ -271,10 +254,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
       streamUrl: null as String?,
       host: _mapServerNameToProxyHost(server.nombre),
     );
-    if (!await MediaFlowService.ensureRunning()) {
-      _log.add('[WARN] Proxy no responde en :${MediaFlowService.port}, uso URL directa');
-      return direct;
+    if (!await MediaFlowService.isRunning() && mounted) {
+      _log.add('[WARN] Proxy no responde en :${MediaFlowService.port}, se reinicia');
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(AppError.engine.message)));
     }
+    // Sin proxy no hay extractor: la URL del servidor es una página, no un video.
+    if (!await MediaFlowService.ensureRunning()) throw AppError.engine;
 
     final host = _mapServerNameToProxyHost(server.nombre);
     final proxyUrl = MediaFlowService.buildUrl(host, server.url);
@@ -428,8 +415,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Widget _body() {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) {
-      return ErrorState(
-          title: 'No se pudieron cargar los servidores', detail: _error, onRetry: _load);
+      return ErrorState(error: _error, onRetry: _load);
     }
     if (_servers.isEmpty) {
       return const EmptyState(

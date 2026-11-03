@@ -1,28 +1,23 @@
 import 'package:flutter/material.dart';
 
-/// Paleta oscura profunda, con acentos naranja y rojo.
+/// Fondo negro y grises neutros, con un único acento: el naranja de Crunchyroll.
 class AppColors {
-  static const background = Color(0xFF060608);
-  static const surface = Color(0xFF121216);
-  static const surfaceHigh = Color(0xFF1F2026);
-  static const primary = Color(0xFFFF6A1A);
-  static const accentRed = Color(0xFFE50914);
-  static const textMuted = Color(0xFFA0A0A0);
-  static const divider = Color(0xFF26272D);
+  static const background = Color(0xFF0A0A0A);
+  static const surface = Color(0xFF151515);
+  static const surfaceHigh = Color(0xFF222222);
+  static const primary = Color(0xFFF47521);
+  static const accentRed = Color(0xFFE5484D);
+  static const textMuted = Color(0xFF9A9A9A);
+  static const divider = Color(0xFF242424);
 }
 
+/// Radios contenidos: los bordes muy redondeados y las sombras son lo que hace genérica una UI.
 class AppRadius {
-  static const small = 8.0;
-  static const card = 12.0;
-  static const button = 14.0;
-  static const sheet = 20.0;
+  static const small = 4.0;
+  static const card = 6.0;
+  static const button = 6.0;
+  static const sheet = 12.0;
   static const cardAll = BorderRadius.all(Radius.circular(card));
-}
-
-class AppShadows {
-  static const soft = [
-    BoxShadow(color: Color(0x66000000), blurRadius: 16, offset: Offset(0, 6)),
-  ];
 }
 
 class AppTheme {
@@ -93,8 +88,7 @@ class AppTheme {
       ),
       cardTheme: CardThemeData(
         color: AppColors.surface,
-        elevation: 3,
-        shadowColor: Colors.black54,
+        elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.card)),
       ),
@@ -104,8 +98,6 @@ class AppTheme {
           foregroundColor: Colors.black,
           textStyle: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.6),
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-          elevation: 3,
-          shadowColor: const Color(0x66FF6A1A),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.button)),
         ),
       ),
