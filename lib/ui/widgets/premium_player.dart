@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:screen_brightness/screen_brightness.dart';
-import '../../services/hls_window.dart';
 import '../theme/app_theme.dart';
 
 /// Buffer del reproductor: 128 MB de demuxer.
@@ -18,7 +17,8 @@ const _lavfReconnect = 'reconnect=1,reconnect_streamed=1,reconnect_on_network_er
 /// Brillo de la app al abrir el reproductor: el gesto de brillo parte de este valor.
 double? _appBrightness;
 
-Future<void> _loadBrightness() async {
+/// Lee el brillo actual para que el gesto de brillo parta de él.
+Future<void> loadAppBrightness() async {
   try {
     _appBrightness = await ScreenBrightness.instance.application;
   } catch (_) {
@@ -26,12 +26,23 @@ Future<void> _loadBrightness() async {
   }
 }
 
+double? currentAppBrightness() => _appBrightness;
+
+void setAppBrightness(double value) {
+  _appBrightness = value;
+  ScreenBrightness.instance.setApplicationScreenBrightness(value).catchError((Object _) {});
+}
+
+void resetAppBrightness() {
+  ScreenBrightness.instance.resetApplicationScreenBrightness().catchError((Object _) {});
+}
+
 /// Crea un `Player` con buffer grande y pre-buffering agresivo.
 ///
 /// Las propiedades de mpv se aplican en cuanto el reproductor está listo; si alguna no existe
 /// en la build de libmpv de la plataforma se ignora (no afecta a la reproducción).
 Player createPremiumPlayer({MPVLogLevel logLevel = MPVLogLevel.error}) {
-  _loadBrightness();
+  loadAppBrightness();
   final player = Player(
     configuration: PlayerConfiguration(bufferSize: kPlayerBufferBytes, logLevel: logLevel),
   );
@@ -89,8 +100,7 @@ class PlaybackWatchdog {
           onGiveUp: onGiveUp,
         );
 
-  /// Sin `Player` de por medio, para poder probar la lógica sin libmpv.
-  @visibleForTesting
+  /// Con cualquier motor, y sin libmpv en las pruebas.
   PlaybackWatchdog.withSource({
     required Stream<Duration> position,
     required bool Function() shouldWatch,
@@ -246,11 +256,18 @@ class PlayerWatermark extends StatelessWidget {
 }
 
 /// Spinner con el estado de la conexión. Durante un buffering normal no lleva texto.
-class _StatusOverlay extends StatelessWidget {
-  final Player player;
+class PlaybackStatusOverlay extends StatelessWidget {
+  final Stream<bool> buffering;
+  final bool initialBuffering;
   final ValueListenable<PlaybackPhase> phase;
   final String connectingLabel;
-  const _StatusOverlay({required this.player, required this.phase, required this.connectingLabel});
+  const PlaybackStatusOverlay({
+    super.key,
+    required this.buffering,
+    required this.initialBuffering,
+    required this.phase,
+    required this.connectingLabel,
+  });
 
   Widget _spinner([String? label]) {
     return Center(
@@ -280,8 +297,8 @@ class _StatusOverlay extends StatelessWidget {
           if (p == PlaybackPhase.retrying) return _spinner('Reintentando...');
           if (p == PlaybackPhase.failed) return const SizedBox.shrink();
           return StreamBuilder<bool>(
-            stream: player.stream.buffering,
-            initialData: player.state.buffering,
+            stream: buffering,
+            initialData: initialBuffering,
             builder: (context, snap) => snap.data == true ? _spinner() : const SizedBox.shrink(),
           );
         },
@@ -435,23 +452,20 @@ class QualityButton extends StatelessWidget {
   }
 }
 
-/// Barra con el tiempo real del episodio, para cuando el reproductor solo tiene abierto un tramo:
-/// su posición empieza en 0 al inicio del tramo y su duración es la del tramo.
+/// Barra de progreso para motores sin controles propios.
 ///
-/// Escucha [window] y lee [currentPosition] por su cuenta, en vez de recibir valores fijos: llega a
-/// los controles por `MaterialVideoControlsTheme`, cuyo `updateShouldNotify` está invertido en
-/// `media_kit` y que en pantalla completa se copia una sola vez al entrar. Con valores fijos, la
-/// barra se queda con el primer tramo aunque se abra otro.
+/// Lee posición y duración por su cuenta en vez de recibir valores fijos, porque en pantalla completa
+/// el widget puede vivir mucho más que el video que había al crearlo.
 class TimelineBar extends StatefulWidget {
   final Stream<Duration> position;
   final Duration Function() currentPosition;
-  final ValueListenable<HlsWindow?> window;
+  final Duration Function() duration;
   final void Function(Duration) onSeek;
   const TimelineBar({
     super.key,
     required this.position,
     required this.currentPosition,
-    required this.window,
+    required this.duration,
     required this.onSeek,
   });
 
@@ -471,26 +485,21 @@ class _TimelineBarState extends State<TimelineBar> {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<HlsWindow?>(
-      valueListenable: widget.window,
-      builder: (context, window, _) => window == null
-          ? const SizedBox.shrink()
-          : StreamBuilder<Duration>(
-              stream: widget.position,
-              builder: (context, _) => _bar(window, widget.currentPosition()),
-            ),
+    return StreamBuilder<Duration>(
+      stream: widget.position,
+      builder: (context, _) => _bar(widget.currentPosition(), widget.duration()),
     );
   }
 
-  Widget _bar(HlsWindow window, Duration position) {
-    final max = window.total.inMilliseconds.toDouble();
-    final real = window.offset + position;
-    final value = (_dragging ?? real.inMilliseconds.toDouble()).clamp(0.0, max);
+  Widget _bar(Duration position, Duration duration) {
+    // Hasta conocer la duración, `Slider` necesita un máximo mayor que su mínimo.
+    final max = duration > Duration.zero ? duration.inMilliseconds.toDouble() : 1.0;
+    final value = (_dragging ?? position.inMilliseconds.toDouble()).clamp(0.0, max);
     return Row(
       children: [
         Text(
           '${TimelineBar.format(Duration(milliseconds: value.round()))} / '
-          '${TimelineBar.format(window.total)}',
+          '${TimelineBar.format(duration)}',
           style: const TextStyle(color: Colors.white, fontSize: 12),
         ),
         Expanded(
@@ -537,13 +546,12 @@ MaterialVideoControlsThemeData premiumControlsTheme(
   void Function(double)? onBrightnessChanged,
   double? initialBrightness,
   void Function()? onBrightnessReset,
-  Widget? timeline,
 }) {
   return base.copyWith(
     visibleOnMount: true,
     controlsHoverDuration: const Duration(seconds: 5),
-    displaySeekBar: !live && timeline == null,
-    seekGesture: !live && timeline == null,
+    displaySeekBar: !live,
+    seekGesture: !live,
     seekOnDoubleTap: !live,
     seekOnDoubleTapEnabledWhileControlsVisible: !live,
     speedUpOnLongPress: false,
@@ -555,18 +563,14 @@ MaterialVideoControlsThemeData premiumControlsTheme(
     onBrightnessChanged: onBrightnessChanged,
     initialBrightness: initialBrightness,
     onBrightnessReset: onBrightnessReset,
-    // El spinner lo pinta `_StatusOverlay`, que además dice qué está pasando.
+    // El spinner lo pinta `PlaybackStatusOverlay`, que además dice qué está pasando.
     bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
     seekBarPositionColor: AppColors.primary,
     seekBarThumbColor: AppColors.primary,
     primaryButtonBar: live ? [livePlayButton] : null,
     bottomButtonBar: [
-      if (timeline != null)
-        Expanded(child: timeline)
-      else ...[
-        if (live) const _LiveBadge() else const MaterialPositionIndicator(),
-        const Spacer(),
-      ],
+      if (live) const _LiveBadge() else const MaterialPositionIndicator(),
+      const Spacer(),
       quality,
       const MaterialFullscreenButton(),
     ],
@@ -584,9 +588,6 @@ class PremiumVideo extends StatelessWidget {
   final bool? live;
   final String connectingLabel;
 
-  /// Sustituye a la barra de progreso de `media_kit`: ver [TimelineBar].
-  final Widget? timeline;
-
   const PremiumVideo({
     super.key,
     required this.player,
@@ -594,7 +595,6 @@ class PremiumVideo extends StatelessWidget {
     required this.phase,
     required this.connectingLabel,
     this.live,
-    this.timeline,
   });
 
   MaterialVideoControlsThemeData _theme(MaterialVideoControlsThemeData base, bool isLive) {
@@ -608,16 +608,10 @@ class PremiumVideo extends StatelessWidget {
         onPlay: player.play,
       ),
       onVolumeChanged: (v) => player.setVolume(v * 100),
-      timeline: timeline,
       initialVolume: player.state.volume / 100,
-      onBrightnessChanged: (v) {
-        _appBrightness = v;
-        ScreenBrightness.instance.setApplicationScreenBrightness(v).catchError((Object _) {});
-      },
+      onBrightnessChanged: setAppBrightness,
       initialBrightness: _appBrightness,
-      onBrightnessReset: () {
-        ScreenBrightness.instance.resetApplicationScreenBrightness().catchError((Object _) {});
-      },
+      onBrightnessReset: resetAppBrightness,
     );
   }
 
@@ -640,7 +634,12 @@ class PremiumVideo extends StatelessWidget {
               children: [
                 const PlayerWatermark(),
                 MaterialVideoControls(state),
-                _StatusOverlay(player: player, phase: phase, connectingLabel: connectingLabel),
+                PlaybackStatusOverlay(
+                  buffering: player.stream.buffering,
+                  initialBuffering: player.state.buffering,
+                  phase: phase,
+                  connectingLabel: connectingLabel,
+                ),
               ],
             ),
           ),

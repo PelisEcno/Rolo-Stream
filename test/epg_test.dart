@@ -435,19 +435,6 @@ void main() {
       });
     }
 
-    test('con barra propia se oculta la de media_kit y su gesto de buscar', () {
-      final t = premiumControlsTheme(kDefaultMaterialVideoControlsThemeData,
-          live: false,
-          quality: const SizedBox(),
-          livePlayButton: const SizedBox(),
-          timeline: const Text('barra'));
-      expect(t.displaySeekBar, isFalse);
-      expect(t.seekGesture, isFalse);
-      expect(t.seekOnDoubleTap, isTrue);
-      expect(has<MaterialPositionIndicator>(t.bottomButtonBar), isFalse);
-      expect(has<MaterialFullscreenButton>(t.bottomButtonBar), isTrue);
-    });
-
     test('no se añaden márgenes que dejen sin toques la parte baja del video', () {
       final t = theme(kDefaultMaterialVideoControlsThemeData, live: false);
       final deadZone = 16 + t.bottomButtonBarMargin.vertical + t.buttonBarHeight;
