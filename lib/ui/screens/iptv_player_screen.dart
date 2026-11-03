@@ -5,6 +5,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../../iptv/iptv_models.dart';
 import '../theme/app_theme.dart';
+import '../widgets/premium_player.dart';
 
 /// Reproductor de un canal IPTV. Abre la URL tal cual (HLS, MPEG-TS, MP4…) con `media_kit`.
 ///
@@ -20,21 +21,29 @@ class IPTVPlayerScreen extends StatefulWidget {
 }
 
 class _IPTVPlayerScreenState extends State<IPTVPlayerScreen> {
-  late final Player _player = Player();
+  late final Player _player = createPremiumPlayer();
   late final VideoController _controller = VideoController(_player);
   final _subs = <StreamSubscription<dynamic>>[];
 
+  late final StallRecovery _recovery = StallRecovery(
+    _player,
+    reopen: (at) => StallRecovery.reopenAt(_player, _media, at),
+    onGiveUp: () {
+      if (mounted) setState(() => _error = _friendlyError);
+    },
+  );
+
   Timer? _errorTimer;
-  bool _buffering = true;
   String? _error;
+
+  Media get _media => Media(widget.channel.url,
+      httpHeaders: widget.channel.headers.isEmpty ? null : widget.channel.headers);
 
   @override
   void initState() {
     super.initState();
-    _subs.add(_player.stream.buffering.listen((b) {
-      if (mounted) setState(() => _buffering = b);
-    }));
     _subs.add(_player.stream.error.listen(_onError));
+    _recovery; // empieza a vigilar el buffer
     _open();
   }
 
@@ -44,19 +53,16 @@ class _IPTVPlayerScreenState extends State<IPTVPlayerScreen> {
     for (final s in _subs) {
       s.cancel();
     }
+    _recovery.dispose();
     _player.dispose();
     super.dispose();
   }
 
   Future<void> _open() async {
     _errorTimer?.cancel();
-    setState(() {
-      _error = null;
-      _buffering = true;
-    });
-    final c = widget.channel;
+    setState(() => _error = null);
     try {
-      await _player.open(Media(c.url, httpHeaders: c.headers.isEmpty ? null : c.headers));
+      await _player.open(_media);
     } catch (_) {
       if (mounted) setState(() => _error = _friendlyError);
     }
@@ -105,27 +111,10 @@ class _IPTVPlayerScreenState extends State<IPTVPlayerScreen> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                StreamBuilder<Duration>(
-                  stream: _player.stream.duration,
-                  initialData: _player.state.duration,
-                  builder: (context, snap) {
-                    final live = (snap.data ?? Duration.zero) == Duration.zero;
-                    return MaterialVideoControlsTheme(
-                      normal: kDefaultMaterialVideoControlsThemeData.copyWith(
-                        displaySeekBar: !live,
-                        seekBarPositionColor: AppColors.primary,
-                        seekBarThumbColor: AppColors.primary,
-                      ),
-                      fullscreen: kDefaultMaterialVideoControlsThemeDataFullscreen.copyWith(
-                        displaySeekBar: !live,
-                        seekBarPositionColor: AppColors.primary,
-                        seekBarThumbColor: AppColors.primary,
-                      ),
-                      child: Video(controller: _controller, controls: MaterialVideoControls),
-                    );
-                  },
-                ),
-                if (_buffering && _error == null) const Center(child: CircularProgressIndicator()),
+                PremiumVideo(
+                    player: _player,
+                    controller: _controller,
+                    reconnecting: _recovery.reconnecting),
                 if (_error != null)
                   Container(
                     color: Colors.black87,

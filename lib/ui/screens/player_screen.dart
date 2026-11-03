@@ -13,6 +13,7 @@ import '../theme/app_theme.dart';
 import '../utils/episode_label.dart';
 import '../widgets/anime_card.dart';
 import '../widgets/debug_console.dart';
+import '../widgets/premium_player.dart';
 
 class PlayerScreen extends StatefulWidget {
   final String slug;
@@ -38,9 +39,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late final SourcePlugin _source =
       pluginRegistry.byId(widget.sourceId ?? '') ?? pluginRegistry.active;
   // `warn` deja pasar los avisos de FFmpeg/mpv (hls, tcp, http…) a la consola de depuración.
-  late final Player _player =
-      Player(configuration: const PlayerConfiguration(logLevel: MPVLogLevel.warn));
+  late final Player _player = createPremiumPlayer(logLevel: MPVLogLevel.warn);
   late final VideoController _controller = VideoController(_player);
+  late final StallRecovery _recovery = StallRecovery(
+    _player,
+    reopen: (at) async {
+      // Cambiando de servidor: la apertura en curso ya sustituye a la fuente atascada.
+      if (_opening) return;
+      _log.add('[WARN] Buffer vacío: reconectando en ${at.inSeconds}s');
+      await StallRecovery.reopenAt(_player, _media!, at);
+    },
+    onGiveUp: () {
+      if (!mounted) return;
+      _errorShownAt = _player.state.position; // el aviso se quita solo si el video vuelve a avanzar
+      setState(() => _playError = 'Se perdió la conexión con el servidor');
+    },
+  );
+  Media? _media;
 
   List<VideoServer> _servers = [];
   int _selected = 0;
@@ -76,6 +91,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (mounted) setState(() => _playError = null);
       }
     });
+    _recovery; // empieza a vigilar el buffer
     _load();
   }
 
@@ -104,6 +120,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void dispose() {
     _errorTimer?.cancel();
+    _recovery.dispose();
     _log.dispose();
     _player.dispose();
     super.dispose();
@@ -331,7 +348,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
       _log.add('[PLAY] media_kit open${viaProxy ? ' (vía proxy)' : ''}: '
           '${DebugLog.short(finalUrl.replaceAll(MediaFlowService.apiPassword, '***'))}');
-      await _player.open(Media(finalUrl, httpHeaders: viaProxy ? null : video.headers));
+      _media = Media(finalUrl, httpHeaders: viaProxy ? null : video.headers);
+      await _player.open(_media!);
     } catch (e) {
       _log.add('[PLAYER] ${DebugLog.short(e.toString(), 300)}');
       if (mounted && _selected == i) setState(() => _playError = e.toString());
@@ -346,7 +364,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          Video(controller: _controller, controls: MaterialVideoControls),
+          PremiumVideo(
+              player: _player,
+              controller: _controller,
+              reconnecting: _recovery.reconnecting),
           if (_opening) const Center(child: CircularProgressIndicator()),
           if (_playError != null && !_opening)
             Container(

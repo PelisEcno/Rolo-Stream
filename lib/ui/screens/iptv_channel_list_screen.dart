@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../../iptv/epg.dart';
 import '../../iptv/iptv_models.dart';
 import '../../iptv/iptv_service.dart';
 import '../../iptv/m3u_parser.dart';
@@ -93,12 +94,24 @@ class _ChannelBrowser extends StatefulWidget {
 class _ChannelBrowserState extends State<_ChannelBrowser> {
   late final Map<String, List<Channel>> _groups = groupChannels(widget.channels);
   final _expanded = <String>{};
+  bool _guide = false;
   final _search = TextEditingController();
   Timer? _debounce;
   String _query = '';
+  Timer? _clock;
+
+  @override
+  void initState() {
+    super.initState();
+    // "Ahora" y "Después" cambian con la hora aunque no lleguen datos nuevos.
+    _clock = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (EPGService.instance.hasData) setState(() {});
+    });
+  }
 
   @override
   void dispose() {
+    _clock?.cancel();
     _debounce?.cancel();
     _search.dispose();
     super.dispose();
@@ -139,42 +152,76 @@ class _ChannelBrowserState extends State<_ChannelBrowser> {
     return out;
   }
 
+  /// Canales con datos de guía (que además coincidan con la búsqueda), con un tope.
+  List<Channel> _guideChannels() {
+    final out = <Channel>[];
+    for (final c in widget.channels) {
+      if (EPGService.instance.scheduleFor(c) == null) continue;
+      if (_query.isNotEmpty && !c.nombre.toLowerCase().contains(_query)) continue;
+      out.add(c);
+      if (out.length >= _maxSearchResults) break;
+    }
+    return out;
+  }
+
   @override
   Widget build(BuildContext context) {
+    // La guía se rellena desde fuera (XMLTV): al cambiar, se repinta la lista.
+    return ListenableBuilder(
+      listenable: EPGService.instance,
+      builder: (context, _) => _buildBody(context),
+    );
+  }
+
+  Widget _buildBody(BuildContext context) {
     final searching = _query.isNotEmpty;
-    final items = searching ? _searchResults() : _grouped();
+    final items = _guide ? const <Object>[] : (searching ? _searchResults() : _grouped());
 
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-          child: TextField(
-            controller: _search,
-            onChanged: _onQuery,
-            textInputAction: TextInputAction.search,
-            decoration: InputDecoration(
-              hintText: 'Buscar entre ${widget.channels.length} canales',
-              prefixIcon: const Icon(Icons.search_rounded, color: AppColors.textMuted),
-              suffixIcon: _search.text.isEmpty
-                  ? null
-                  : IconButton(
-                      icon: const Icon(Icons.close_rounded, color: AppColors.textMuted),
-                      onPressed: () {
-                        _search.clear();
-                        _onQuery('');
-                      },
-                    ),
-            ),
+          padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _search,
+                  onChanged: _onQuery,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: 'Buscar entre ${widget.channels.length} canales',
+                    prefixIcon: const Icon(Icons.search_rounded, color: AppColors.textMuted),
+                    suffixIcon: _search.text.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.close_rounded, color: AppColors.textMuted),
+                            onPressed: () {
+                              _search.clear();
+                              _onQuery('');
+                            },
+                          ),
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: _guide ? 'Ver canales' : 'Guía de programación',
+                icon: Icon(_guide ? Icons.view_list_rounded : Icons.calendar_view_day_rounded,
+                    color: _guide ? AppColors.primary : AppColors.textMuted),
+                onPressed: () => setState(() => _guide = !_guide),
+              ),
+            ],
           ),
         ),
-        if (searching && items.length >= _maxSearchResults)
+        if (!_guide && searching && items.length >= _maxSearchResults)
           const Padding(
             padding: EdgeInsets.only(bottom: 4),
             child: Text('Mostrando los primeros $_maxSearchResults resultados. Afina la búsqueda.',
                 style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
           ),
         Expanded(
-          child: items.isEmpty
+          child: _guide
+              ? _GuideView(channels: _guideChannels(), onPlay: _play)
+              : items.isEmpty
               ? const EmptyState(
                   icon: Icons.search_off_rounded,
                   title: 'Sin resultados',
@@ -250,6 +297,27 @@ class _ChannelTile extends StatelessWidget {
   final VoidCallback onTap;
   const _ChannelTile({required this.channel, required this.showGroup, required this.onTap});
 
+  /// Grupo (en búsquedas) y, si el canal tiene guía, "Ahora" y "Después".
+  Widget? _subtitle() {
+    final nn = EPGService.instance.nowNextFor(channel);
+    if (!showGroup && nn == null) return null;
+    const muted = TextStyle(color: AppColors.textMuted, fontSize: 12);
+    Widget line(String text, [TextStyle style = muted]) =>
+        Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
+    final ahora = nn?.ahora;
+    final despues = nn?.despues;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (showGroup) line(channel.grupo),
+        if (ahora != null)
+          line('Ahora: ${ahora.titulo}',
+              const TextStyle(color: AppColors.primary, fontSize: 12, fontWeight: FontWeight.w700)),
+        if (despues != null) line('Después: ${despues.titulo}'),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListTile(
@@ -268,13 +336,78 @@ class _ChannelTile extends StatelessWidget {
         ),
       ),
       title: Text(channel.nombre, maxLines: 2, overflow: TextOverflow.ellipsis),
-      subtitle: showGroup
-          ? Text(channel.grupo,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: AppColors.textMuted, fontSize: 12))
-          : null,
+      subtitle: _subtitle(),
       trailing: const Icon(Icons.play_arrow_rounded, color: AppColors.primary),
+    );
+  }
+}
+
+/// Guía de programación: una fila por canal con lo que emite ahora (con su progreso) y lo siguiente.
+class _GuideView extends StatelessWidget {
+  final List<Channel> channels;
+  final void Function(Channel) onPlay;
+  const _GuideView({required this.channels, required this.onPlay});
+
+  @override
+  Widget build(BuildContext context) {
+    if (channels.isEmpty) {
+      final hasData = EPGService.instance.hasData;
+      return EmptyState(
+        icon: Icons.calendar_view_day_rounded,
+        title: hasData ? 'Sin resultados' : 'Aún no hay guía de programación',
+        subtitle: hasData
+            ? 'Prueba con otro nombre.'
+            : 'Cuando la lista incluya datos de programación, aparecerán aquí.',
+      );
+    }
+    final now = DateTime.now();
+    return ListView.separated(
+      itemCount: channels.length,
+      separatorBuilder: (_, __) => const Divider(height: 1, color: AppColors.divider),
+      itemBuilder: (context, i) {
+        final c = channels[i];
+        final nn = EPGService.instance.nowNextFor(c, now: now);
+        final ahora = nn?.ahora;
+        final despues = nn?.despues;
+        return InkWell(
+          onTap: () => onPlay(c),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(c.nombre,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w800)),
+                const SizedBox(height: 6),
+                if (ahora != null) ...[
+                  Text('Ahora · ${ahora.rango}',
+                      style: const TextStyle(
+                          color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w700)),
+                  Text(ahora.titulo, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 4),
+                  LinearProgressIndicator(
+                    value: ahora.progressAt(now),
+                    minHeight: 3,
+                    color: AppColors.primary,
+                    backgroundColor: AppColors.surfaceHigh,
+                  ),
+                ],
+                if (despues != null) ...[
+                  const SizedBox(height: 6),
+                  Text('Después · ${despues.rango}',
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+                  Text(despues.titulo,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: AppColors.textMuted)),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
