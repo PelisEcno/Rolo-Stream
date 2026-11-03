@@ -44,7 +44,7 @@ class _DetailScreenState extends State<DetailScreen> {
 
   void _retry() => setState(() => _future = _source.getAnime(_slug));
 
-  void _play(Episode ep) {
+  void _play(Episode ep, String imagen) {
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -52,7 +52,8 @@ class _DetailScreenState extends State<DetailScreen> {
             sourceId: _source.id,
             slug: _slug,
             numero: ep.numero,
-            animeTitulo: widget.nombre),
+            animeTitulo: widget.nombre,
+            imagen: imagen),
       ),
     );
   }
@@ -88,7 +89,7 @@ class _DetailScreenState extends State<DetailScreen> {
       children: [
         Expanded(
           child: FilledButton.icon(
-            onPressed: d.episodios.isEmpty ? null : () => _play(d.episodios.first),
+            onPressed: d.episodios.isEmpty ? null : () => _play(d.episodios.first, imagen),
             icon: const Icon(Icons.play_arrow_rounded),
             label: Text(d.episodios.isEmpty
                 ? 'SIN EPISODIOS'
@@ -114,13 +115,12 @@ class _DetailScreenState extends State<DetailScreen> {
 
   Widget _episodeTile(Episode ep, String imagen) {
     return InkWell(
-      onTap: () => _play(ep),
+      onTap: () => _play(ep, imagen),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Row(
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
+            RoundedPoster(
               child: SizedBox(
                 width: 136,
                 height: 77,

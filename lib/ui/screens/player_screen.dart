@@ -9,6 +9,7 @@ import 'package:rolostream_core/rolostream_core.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/mediaflow_service.dart';
 import '../../services/source_registry.dart';
+import '../../services/watch_progress_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/episode_label.dart';
 import '../widgets/anime_card.dart';
@@ -20,6 +21,9 @@ class PlayerScreen extends StatefulWidget {
   final int numero;
   final String animeTitulo;
 
+  /// Carátula para la tarjeta de "Seguir viendo".
+  final String imagen;
+
   /// Fuente del episodio; si es null se usa la activa.
   final String? sourceId;
 
@@ -28,6 +32,7 @@ class PlayerScreen extends StatefulWidget {
     required this.slug,
     required this.numero,
     required this.animeTitulo,
+    this.imagen = '',
     this.sourceId,
   });
 
@@ -54,6 +59,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     },
   );
   Media? _media;
+
+  /// Dónde abrir el video: lo guardado al entrar y, después, por dónde va (también al cambiar de
+  /// servidor).
+  late Duration _resume = WatchProgressService.instance
+          .resumePoint(_source.id, widget.slug, widget.numero) ??
+      Duration.zero;
+  Timer? _progressTimer;
 
   List<VideoServer> _servers = [];
   int _selected = 0;
@@ -90,7 +102,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (mounted) setState(() => _playError = null);
       }
     });
+    _progressTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
     _load();
+  }
+
+  void _saveProgress() {
+    // Solo con el video avanzando: al abrir o reabrir, la posición pasa un momento por 0.
+    if (_watchdog.phase.value != PlaybackPhase.playing) return;
+    final position = _player.state.position;
+    if (position == _resume) return;
+    _resume = position;
+    WatchProgressService.instance.save(
+      sourceId: _source.id,
+      slug: widget.slug,
+      numero: widget.numero,
+      titulo: widget.animeTitulo,
+      imagen: widget.imagen,
+      position: position,
+      duration: _player.state.duration,
+    );
   }
 
   /// Con errores transitorios (un segmento que falla y se reintenta) el video
@@ -119,6 +149,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    _progressTimer?.cancel();
+    _saveProgress();
     _errorTimer?.cancel();
     _watchdog.dispose();
     _log.dispose();
@@ -336,7 +368,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
       _log.add('[PLAY] media_kit open${viaProxy ? ' (vía proxy)' : ''}: '
           '${DebugLog.short(finalUrl.replaceAll(MediaFlowService.apiPassword, '***'))}');
-      _media = Media(finalUrl, httpHeaders: viaProxy ? null : video.headers);
+      if (_resume > Duration.zero) _log.add('[INFO] Reanudando en ${_resume.inSeconds}s');
+      _media = Media(
+        finalUrl,
+        httpHeaders: viaProxy ? null : video.headers,
+        start: _resume > Duration.zero ? _resume : null,
+      );
       _watchdog.begin();
       await _player.open(_media!);
     } catch (e) {

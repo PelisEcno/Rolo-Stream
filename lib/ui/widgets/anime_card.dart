@@ -2,7 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
-/// Póster 2:3 con el título debajo, como en Crunchyroll.
+/// Póster 2:3 con el título debajo.
 class AnimeCard extends StatelessWidget {
   final String nombre;
   final String imagen;
@@ -19,8 +19,7 @@ class AnimeCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
+            child: RoundedPoster(
               child: SizedBox(width: double.infinity, child: PosterImage(url: imagen)),
             ),
           ),
@@ -33,6 +32,21 @@ class AnimeCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Marco de los pósters: bordes redondeados y sombra suave.
+class RoundedPoster extends StatelessWidget {
+  final Widget child;
+  const RoundedPoster({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(AppRadius.card);
+    return DecoratedBox(
+      decoration: BoxDecoration(borderRadius: radius, boxShadow: AppShadows.soft),
+      child: ClipRRect(borderRadius: radius, child: child),
     );
   }
 }
@@ -114,7 +128,8 @@ class SectionRow extends StatelessWidget {
             itemBuilder: (_, i) => SizedBox(
               width: itemWidth,
               child: loading
-                  ? const DecoratedBox(decoration: BoxDecoration(color: AppColors.surface))
+                  ? const DecoratedBox(
+                      decoration: BoxDecoration(color: AppColors.surface, borderRadius: AppRadius.cardAll))
                   : builder(i),
             ),
           ),
@@ -218,7 +233,8 @@ class GridSkeleton extends StatelessWidget {
   Widget build(BuildContext context) {
     return AnimeGrid(
       count: 9,
-      builder: (_) => const DecoratedBox(decoration: BoxDecoration(color: AppColors.surface)),
+      builder: (_) => const DecoratedBox(
+                      decoration: BoxDecoration(color: AppColors.surface, borderRadius: AppRadius.cardAll)),
     );
   }
 }
@@ -248,8 +264,7 @@ class CatalogCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
+            child: RoundedPoster(
               child: SizedBox(
                 width: double.infinity,
                 child: Stack(

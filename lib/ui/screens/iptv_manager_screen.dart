@@ -26,7 +26,7 @@ class IPTVManagerScreen extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surfaceHigh,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.small)),
         title: const Text('Eliminar lista'),
         content: Text('Se quitará "${p.nombre}" de la app. La lista en el servidor no se toca.'),
         actions: [
@@ -68,7 +68,7 @@ class IPTVManagerScreen extends StatelessWidget {
               final p = lists[i];
               return Card(
                 child: ListTile(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.small)),
                   contentPadding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
                   leading: const Icon(Icons.playlist_play_rounded, color: AppColors.primary, size: 32),
                   title: Text(p.nombre, style: const TextStyle(fontWeight: FontWeight.w700)),
@@ -123,7 +123,7 @@ class _AddPlaylistDialogState extends State<_AddPlaylistDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: AppColors.surfaceHigh,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.small)),
       title: const Text('Añadir lista'),
       content: Form(
         key: _form,

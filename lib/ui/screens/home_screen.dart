@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:rolostream_core/rolostream_core.dart';
 import '../../services/source_registry.dart';
+import '../../services/watch_progress_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/episode_label.dart';
 import '../widgets/anime_card.dart';
@@ -63,10 +64,23 @@ class _HomeScreenState extends State<HomeScreen> {
             sourceId: _source.id,
             slug: parsed.slug,
             numero: parsed.numero,
-            animeTitulo: ep.titulo),
+            animeTitulo: ep.titulo,
+            imagen: ep.imagen),
       ),
     );
   }
+
+  void _resume(WatchProgress p) => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PlayerScreen(
+              sourceId: p.sourceId,
+              slug: p.slug,
+              numero: p.numero,
+              animeTitulo: p.titulo,
+              imagen: p.imagen),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -97,6 +111,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: _HeroSection(
                   future: _seriesFuture, onOpen: _openSerie, onRetry: _reloadSeries),
             ),
+            SliverToBoxAdapter(child: _ContinueWatchingSection(onOpen: _resume)),
             SliverToBoxAdapter(
               child: _RecentEpisodesSection(
                   future: _episodesFuture,
@@ -172,7 +187,7 @@ class _HeroSection extends StatelessWidget {
                     colors: [
                       Color(0xB3000000),
                       Colors.transparent,
-                      Color(0x990B0B0D),
+                      Color(0x99060608),
                       AppColors.background,
                     ],
                     stops: [0, 0.3, 0.75, 1],
@@ -207,6 +222,88 @@ class _HeroSection extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+// ─────────────────────── Seguir viendo ───────────────────────
+
+class _ContinueWatchingSection extends StatelessWidget {
+  final void Function(WatchProgress) onOpen;
+  const _ContinueWatchingSection({required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: WatchProgressService.instance,
+      builder: (context, _) {
+        final items = [
+          for (final p in WatchProgressService.instance.continueWatching())
+            // Una fuente que ya no existe no se puede reproducir.
+            if (pluginRegistry.byId(p.sourceId) != null) p,
+        ];
+        if (items.isEmpty) return const SizedBox.shrink();
+        return SectionRow(
+          title: 'Seguir viendo',
+          count: items.length,
+          itemWidth: 208,
+          height: 170,
+          builder: (i) => _ContinueCard(progress: items[i], onTap: () => onOpen(items[i])),
+        );
+      },
+    );
+  }
+}
+
+class _ContinueCard extends StatelessWidget {
+  final WatchProgress progress;
+  final VoidCallback onTap;
+  const _ContinueCard({required this.progress, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          RoundedPoster(
+            child: AspectRatio(
+              aspectRatio: 16 / 9,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  PosterImage(url: progress.imagen),
+                  Container(color: Colors.black26),
+                  const Center(
+                      child: Icon(Icons.play_circle_outline_rounded,
+                          size: 36, color: Colors.white)),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: LinearProgressIndicator(
+                      value: progress.fraction,
+                      minHeight: 4,
+                      color: AppColors.primary,
+                      backgroundColor: Colors.white24,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(episodeLabel(progress.numero),
+              style: const TextStyle(
+                  color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w800)),
+          Text(progress.titulo,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, height: 1.25)),
+        ],
+      ),
     );
   }
 }
@@ -277,8 +374,7 @@ class _EpisodeCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
+          RoundedPoster(
             child: AspectRatio(
               aspectRatio: 16 / 9,
               child: Stack(

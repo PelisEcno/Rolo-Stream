@@ -1,14 +1,28 @@
 import 'package:flutter/material.dart';
 
-/// Paleta inspirada en Crunchyroll: fondo casi negro, superficies grises
-/// frías y un único acento naranja.
+/// Paleta oscura profunda, con acentos naranja y rojo.
 class AppColors {
-  static const background = Color(0xFF0B0B0D);
-  static const surface = Color(0xFF141519);
-  static const surfaceHigh = Color(0xFF23252B);
-  static const primary = Color(0xFFF47521);
+  static const background = Color(0xFF060608);
+  static const surface = Color(0xFF121216);
+  static const surfaceHigh = Color(0xFF1F2026);
+  static const primary = Color(0xFFFF6A1A);
+  static const accentRed = Color(0xFFE50914);
   static const textMuted = Color(0xFFA0A0A0);
-  static const divider = Color(0xFF2A2C32);
+  static const divider = Color(0xFF26272D);
+}
+
+class AppRadius {
+  static const small = 8.0;
+  static const card = 12.0;
+  static const button = 14.0;
+  static const sheet = 20.0;
+  static const cardAll = BorderRadius.all(Radius.circular(card));
+}
+
+class AppShadows {
+  static const soft = [
+    BoxShadow(color: Color(0x66000000), blurRadius: 16, offset: Offset(0, 6)),
+  ];
 }
 
 class AppTheme {
@@ -25,6 +39,15 @@ class AppTheme {
       colorScheme: scheme,
       scaffoldBackgroundColor: AppColors.background,
       dividerColor: AppColors.divider,
+      dialogTheme: DialogThemeData(
+        backgroundColor: AppColors.surfaceHigh,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.sheet)),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: AppColors.surfaceHigh,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.sheet))),
+      ),
       appBarTheme: const AppBarTheme(
         backgroundColor: AppColors.background,
         elevation: 0,
@@ -49,11 +72,11 @@ class AppTheme {
         hintStyle: const TextStyle(color: AppColors.textMuted),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           borderSide: const BorderSide(color: AppColors.primary, width: 2),
         ),
       ),
@@ -62,7 +85,7 @@ class AppTheme {
         selectedColor: AppColors.primary,
         secondarySelectedColor: AppColors.primary,
         side: BorderSide.none,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.small)),
         labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
         secondaryLabelStyle:
             const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.black),
@@ -70,9 +93,10 @@ class AppTheme {
       ),
       cardTheme: CardThemeData(
         color: AppColors.surface,
-        elevation: 0,
+        elevation: 3,
+        shadowColor: Colors.black54,
         margin: EdgeInsets.zero,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.card)),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
@@ -80,7 +104,9 @@ class AppTheme {
           foregroundColor: Colors.black,
           textStyle: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.6),
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          elevation: 3,
+          shadowColor: const Color(0x66FF6A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.button)),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -88,7 +114,7 @@ class AppTheme {
           foregroundColor: AppColors.primary,
           side: const BorderSide(color: AppColors.primary, width: 2),
           padding: const EdgeInsets.all(12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.button)),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
@@ -98,7 +124,7 @@ class AppTheme {
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         backgroundColor: AppColors.surfaceHigh,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.card)),
       ),
     );
   }

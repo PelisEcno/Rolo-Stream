@@ -111,7 +111,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
       backgroundColor: AppColors.surface,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(8))),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.sheet))),
       builder: (ctx) => DraggableScrollableSheet(
         expand: false,
         initialChildSize: 0.6,
@@ -164,9 +164,9 @@ class _ExploreScreenState extends State<ExploreScreen> {
       padding: const EdgeInsets.only(right: 8),
       child: Material(
         color: active ? AppColors.primary : AppColors.surfaceHigh,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(AppRadius.small),
         child: InkWell(
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(AppRadius.small),
           onTap: () => _pick(title: name, options: options, current: value, onSelected: set),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
