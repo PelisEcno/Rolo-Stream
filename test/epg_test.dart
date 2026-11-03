@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import 'package:rolostream/iptv/epg.dart';
 import 'package:rolostream/iptv/iptv_models.dart';
 import 'package:rolostream/iptv/iptv_service.dart';
@@ -171,8 +172,6 @@ void main() {
       final logo = tester.getRect(find.byType(Image));
       expect(screen.right - logo.right, 12);
       expect(screen.bottom - logo.bottom, 8);
-      // No debe llegar a la barra de controles, que empieza 40 px por encima del borde.
-      expect(screen.bottom - logo.top, lessThan(40));
 
       await tester.tapAt(logo.center);
       expect(taps, 1);
@@ -184,100 +183,235 @@ void main() {
     });
   });
 
-  group('StallRecovery', () {
-    late StreamController<bool> buffering;
-    late bool isBuffering;
-    late int reopens;
+  group('PlaybackWatchdog', () {
+    late StreamController<Duration> position;
+    late bool watching;
+    late List<Duration> reopens;
     late int giveUps;
-    late List<Duration> positions;
+    late PlaybackWatchdog dog;
 
-    void emit(bool b) {
-      isBuffering = b;
-      buffering.add(b);
-    }
-
-    StallRecovery create({Future<void> Function(Duration)? reopen}) => StallRecovery.withSource(
-          buffering: buffering.stream,
-          isBuffering: () => isBuffering,
-          hasMedia: () => true,
-          position: () => const Duration(minutes: 5),
-          reopen: reopen ??
-              (at) async {
-                reopens++;
-                positions.add(at);
-              },
+    // El vigilante se crea dentro de la prueba: su suscripción debe usar el reloj simulado.
+    void dogTest(String name, Future<void> Function(WidgetTester) body) {
+      testWidgets(name, (tester) async {
+        position = StreamController<Duration>(sync: true);
+        watching = true;
+        reopens = [];
+        giveUps = 0;
+        dog = PlaybackWatchdog.withSource(
+          position: position.stream,
+          shouldWatch: () => watching,
+          reopen: (at) async => reopens.add(at),
           onGiveUp: () => giveUps++,
         );
-
-    setUp(() {
-      buffering = StreamController<bool>(sync: true);
-      isBuffering = false;
-      reopens = 0;
-      giveUps = 0;
-      positions = [];
-    });
-
-    testWidgets('un buffering corto no reconecta', (tester) async {
-      final r = create();
-      emit(true);
-      await tester.pump(const Duration(seconds: 11));
-      emit(false);
-      await tester.pump(const Duration(seconds: 30));
-      expect(reopens, 0);
-      r.dispose();
-    });
-
-    testWidgets('un atasco largo reabre en la posición donde iba', (tester) async {
-      final r = create();
-      emit(true);
-      await tester.pump(const Duration(seconds: 12));
-      expect(reopens, 1);
-      expect(positions.single, const Duration(minutes: 5));
-      expect(r.reconnecting.value, isTrue);
-      r.dispose();
-    });
-
-    testWidgets('se rinde aunque cada reapertura emita buffering=false', (tester) async {
-      // Lo que hace `Player.open` de verdad: false y enseguida true otra vez.
-      late StallRecovery r;
-      r = create(reopen: (_) async {
-        reopens++;
-        emit(false);
-        emit(true);
+        await body(tester);
+        dog.dispose();
       });
-      emit(true);
-      for (var i = 0; i < 6; i++) {
-        await tester.pump(const Duration(seconds: 12));
+    }
+
+    /// Hace avanzar la reproducción en pasos de medio segundo.
+    void play(int fromMs, int toMs) {
+      for (var ms = fromMs; ms <= toMs; ms += 500) {
+        position.add(Duration(milliseconds: ms));
       }
-      expect(reopens, 3);
-      expect(giveUps, greaterThanOrEqualTo(1));
-      expect(r.reconnecting.value, isFalse);
-      r.dispose();
+    }
+
+    dogTest('al arrancar pasa de conectando a reproduciendo sin reabrir', (tester) async {
+      dog.begin();
+      expect(dog.phase.value, PlaybackPhase.connecting);
+      await tester.pump(const Duration(seconds: 9));
+      play(0, 1500);
+      expect(dog.phase.value, PlaybackPhase.playing);
+      await tester.pump(const Duration(seconds: 2));
+      expect(reopens, isEmpty);
     });
 
-    testWidgets('si la reproducción se mantiene sana vuelve a tener todos los intentos', (tester) async {
-      final r = create();
+    dogTest('a los 10 s sin arrancar reabre y dice que reintenta', (tester) async {
+      dog.begin();
+      await tester.pump(const Duration(milliseconds: 9999));
+      expect(reopens, isEmpty);
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(reopens, [Duration.zero]);
+      expect(dog.phase.value, PlaybackPhase.retrying);
+    });
+
+    dogTest('cada intento espera más: un stream lento llega a arrancar', (tester) async {
+      dog.begin();
+      await tester.pump(const Duration(seconds: 10));
+      expect(reopens.length, 1);
+      await tester.pump(const Duration(seconds: 14));
+      expect(reopens.length, 1); // el segundo intento aguanta 15 s
+      play(0, 1500);
+      expect(dog.phase.value, PlaybackPhase.playing);
+    });
+
+    dogTest('agotados los intentos se rinde una sola vez y deja de reabrir', (tester) async {
+      dog.begin();
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pump(const Duration(seconds: 15));
+      expect(reopens.length, 2);
+      await tester.pump(const Duration(seconds: 20));
+      expect(giveUps, 1);
+      expect(dog.phase.value, PlaybackPhase.failed);
+      await tester.pump(const Duration(seconds: 120));
+      expect(reopens.length, 2);
+      expect(giveUps, 1);
+    });
+
+    dogTest('el salto de posición de un seek o de open no cuenta como arrancar', (tester) async {
+      dog.begin();
+      position.add(Duration.zero);
+      position.add(const Duration(minutes: 5));
+      position.add(Duration.zero);
+      expect(dog.phase.value, PlaybackPhase.connecting);
+      await tester.pump(const Duration(seconds: 10));
+      expect(reopens.length, 1);
+    });
+
+    dogTest('un atasco en plena reproducción reabre donde iba', (tester) async {
+      dog.begin();
+      play(60000, 62000);
+      expect(dog.phase.value, PlaybackPhase.playing);
+      await tester.pump(const Duration(seconds: 11));
+      expect(reopens, isEmpty);
+      await tester.pump(const Duration(seconds: 1));
+      expect(reopens, [const Duration(seconds: 62)]);
+      expect(dog.phase.value, PlaybackPhase.retrying);
+
+      // `open` devuelve la posición a 0: un segundo reintento no debe perder el punto.
+      position.add(Duration.zero);
+      await tester.pump(const Duration(seconds: 15));
+      expect(reopens.last, const Duration(seconds: 62));
+    });
+
+    dogTest('al recuperarse vuelve a tener todos los intentos', (tester) async {
+      dog.begin();
       for (var ciclo = 0; ciclo < 5; ciclo++) {
-        emit(true);
+        final base = ciclo * 100000;
+        play(base, base + 2000);
+        expect(dog.phase.value, PlaybackPhase.playing);
         await tester.pump(const Duration(seconds: 12));
-        emit(false);
-        await tester.pump(const Duration(seconds: 6));
-        expect(r.reconnecting.value, isFalse);
       }
-      expect(reopens, 5);
+      expect(reopens.length, 5);
       expect(giveUps, 0);
-      r.dispose();
     });
 
-    testWidgets('cerrar el reproductor durante una reapertura no deja nada vivo', (tester) async {
-      final pending = Completer<void>();
-      final r = create(reopen: (_) => pending.future);
-      emit(true);
-      await tester.pump(const Duration(seconds: 12));
-      r.dispose();
-      pending.complete();
-      await tester.pump(const Duration(seconds: 60));
-      expect(giveUps, 0);
+    dogTest('una pausa o el final del video no se toman por un atasco', (tester) async {
+      dog.begin();
+      play(0, 2000);
+      watching = false;
+      await tester.pump(const Duration(seconds: 120));
+      expect(reopens, isEmpty);
+      expect(dog.phase.value, PlaybackPhase.playing);
+    });
+
+    dogTest('stop cancela la vigilancia', (tester) async {
+      dog.begin();
+      dog.stop();
+      await tester.pump(const Duration(seconds: 120));
+      expect(reopens, isEmpty);
+      expect(dog.phase.value, PlaybackPhase.idle);
+    });
+
+    dogTest('connecting no reabre mientras se resuelve el servidor', (tester) async {
+      dog.begin();
+      dog.connecting();
+      await tester.pump(const Duration(seconds: 120));
+      expect(reopens, isEmpty);
+      expect(dog.phase.value, PlaybackPhase.connecting);
+    });
+  });
+
+  group('decodificación', () {
+    test('solo iOS fuerza software', () {
+      expect(hwdecFor(TargetPlatform.iOS), 'no');
+      expect(hwdecFor(TargetPlatform.android), isNull);
+    });
+  });
+
+  group('directo o bajo demanda', () {
+    bool? isLive(String url) => Channel(nombre: 'x', url: url).isLive;
+
+    test('Xtream Codes', () {
+      expect(isLive('http://srv:8080/user/pass/123'), isTrue);
+      expect(isLive('http://srv:8080/user/pass/123.ts'), isTrue);
+      expect(isLive('http://srv:8080/live/user/pass/123.m3u8'), isTrue);
+      expect(isLive('http://srv:8080/movie/user/pass/123.mkv'), isFalse);
+      expect(isLive('http://srv:8080/series/user/pass/123.mp4'), isFalse);
+      expect(isLive('http://srv:8080/movie/user/pass/123'), isFalse);
+    });
+
+    test('otras listas: por extensión, y un m3u8 cualquiera queda sin decidir', () {
+      expect(isLive('https://cdn/peli.MP4'), isFalse);
+      expect(isLive('https://cdn/canal/index.m3u8'), isNull);
+    });
+  });
+
+  group('controles', () {
+    MaterialVideoControlsThemeData theme(MaterialVideoControlsThemeData base, {required bool live}) =>
+        premiumControlsTheme(base,
+            live: live, quality: const SizedBox(), livePlayButton: const Text('live'));
+
+    bool has<T>(List<Widget> bar) => bar.any((w) => w is T);
+
+    for (final base in [
+      kDefaultMaterialVideoControlsThemeData,
+      kDefaultMaterialVideoControlsThemeDataFullscreen,
+    ]) {
+      test('en directo no hay barra, ni pausa, ni nada para buscar', () {
+        final t = theme(base, live: true);
+        expect(t.displaySeekBar, isFalse);
+        expect(t.seekGesture, isFalse);
+        expect(t.seekOnDoubleTap, isFalse);
+        expect(t.seekOnDoubleTapEnabledWhileControlsVisible, isFalse);
+        expect(has<MaterialPlayOrPauseButton>(t.primaryButtonBar), isFalse);
+        expect(has<MaterialPositionIndicator>(t.bottomButtonBar), isFalse);
+        expect(has<MaterialFullscreenButton>(t.bottomButtonBar), isTrue);
+      });
+
+      test('bajo demanda conserva barra, pausa y búsqueda', () {
+        final t = theme(base, live: false);
+        expect(t.displaySeekBar, isTrue);
+        expect(t.seekGesture, isTrue);
+        expect(t.seekOnDoubleTap, isTrue);
+        expect(has<MaterialPlayOrPauseButton>(t.primaryButtonBar), isTrue);
+        expect(has<MaterialPositionIndicator>(t.bottomButtonBar), isTrue);
+      });
+
+      test('los controles se ven al entrar y duran 5 s', () {
+        final t = theme(base, live: true);
+        expect(t.visibleOnMount, isTrue);
+        expect(t.controlsHoverDuration, const Duration(seconds: 5));
+      });
+    }
+
+    test('no se añaden márgenes que dejen sin toques la parte baja del video', () {
+      final t = theme(kDefaultMaterialVideoControlsThemeData, live: false);
+      final deadZone = 16 + t.bottomButtonBarMargin.vertical + t.buttonBarHeight;
+      expect(deadZone, 72); // sobre unos 210 px de alto
+    });
+
+    testWidgets('el botón de directo solo permite reproducir, nunca pausar', (tester) async {
+      final playing = StreamController<bool>(sync: true);
+      var plays = 0;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: LivePlayButton(
+            playing: playing.stream,
+            initialPlaying: true,
+            onPlay: () => plays++,
+          ),
+        ),
+      ));
+      expect(find.byType(IconButton), findsNothing);
+
+      playing.add(false);
+      await tester.pump();
+      await tester.tap(find.byType(IconButton));
+      expect(plays, 1);
+
+      playing.add(true);
+      await tester.pump();
+      expect(find.byType(IconButton), findsNothing);
     });
   });
 

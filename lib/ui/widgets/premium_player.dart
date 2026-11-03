@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:screen_brightness/screen_brightness.dart';
 import '../theme/app_theme.dart';
 
 /// Buffer del reproductor: 128 MB de demuxer.
@@ -13,11 +14,23 @@ const kPlayerBufferBytes = 128 * 1024 * 1024;
 const _lavfReconnect = 'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,'
     'reconnect_on_http_error=5xx,reconnect_delay_max=4';
 
+/// Brillo de la app al abrir el reproductor: el gesto de brillo parte de este valor.
+double? _appBrightness;
+
+Future<void> _loadBrightness() async {
+  try {
+    _appBrightness = await ScreenBrightness.instance.application;
+  } catch (_) {
+    // Sin brillo disponible el gesto parte del valor por defecto.
+  }
+}
+
 /// Crea un `Player` con buffer grande y pre-buffering agresivo.
 ///
 /// Las propiedades de mpv se aplican en cuanto el reproductor está listo; si alguna no existe
 /// en la build de libmpv de la plataforma se ignora (no afecta a la reproducción).
 Player createPremiumPlayer({MPVLogLevel logLevel = MPVLogLevel.error}) {
+  _loadBrightness();
   final player = Player(
     configuration: PlayerConfiguration(bufferSize: kPlayerBufferBytes, logLevel: logLevel),
   );
@@ -29,9 +42,12 @@ Player createPremiumPlayer({MPVLogLevel logLevel = MPVLogLevel.error}) {
       'demuxer-max-back-bytes': '${32 * 1024 * 1024}',
       'demuxer-readahead-secs': '120',
       'cache-secs': '120',
-      // Si se vacía el buffer, mpv espera a tener 6 s antes de reanudar en vez de tartamudear.
+      // Si se vacía el buffer, mpv espera a tener 3 s antes de reanudar en vez de tartamudear.
       'cache-pause': 'yes',
-      'cache-pause-wait': '6',
+      'cache-pause-wait': '3',
+      // Por defecto mpv espera 60 s a un servidor que no responde y FFmpeg analiza 5 s el stream.
+      'network-timeout': '10',
+      'demuxer-lavf-analyzeduration': '3',
       'demuxer-lavf-o': _lavfReconnect,
       'stream-lavf-o': _lavfReconnect,
     };
@@ -42,120 +58,157 @@ Player createPremiumPlayer({MPVLogLevel logLevel = MPVLogLevel.error}) {
   return player;
 }
 
-/// Si el buffer lleva demasiado tiempo vacío, vuelve a abrir la fuente donde se quedó.
+/// `hwdec` del reproductor: en iOS, VideoToolbox falla con muchos streams IPTV
+/// (`Error while decoding frame`) y se decodifica por software. `null` deja el de `media_kit`.
+String? hwdecFor(TargetPlatform platform) => platform == TargetPlatform.iOS ? 'no' : null;
+
+VideoController createPremiumController(Player player) => VideoController(
+      player,
+      configuration: VideoControllerConfiguration(hwdec: hwdecFor(defaultTargetPlatform)),
+    );
+
+enum PlaybackPhase { idle, connecting, retrying, playing, failed }
+
+/// Reabre la fuente si la posición del video deja de avanzar, al arrancar o en mitad de la
+/// reproducción. Mientras tanto la reproducción no se corta: solo cambia el mensaje de [phase].
 ///
-/// La reproducción no se corta mientras tanto: el spinner de buffering lo pone la UI y esta
-/// clase solo actúa si el atasco dura [stallTimeout]. Tras [maxAttempts] intentos seguidos
-/// deja de insistir y llama a [onGiveUp].
-class StallRecovery {
-  StallRecovery(
+/// Se mira la posición porque `Player.state.playing` solo indica que no está en pausa (es `true`
+/// aunque el video no haya empezado) y `buffering` pasa a `false` en cada `Player.open`.
+///
+/// Cada intento espera más que el anterior ([attemptTimeouts]): un stream que tarda 15 s en
+/// arrancar reiniciado siempre a los 10 s no llegaría a verse nunca. Agotados, llama a [onGiveUp].
+class PlaybackWatchdog {
+  PlaybackWatchdog(
     Player player, {
     required Future<void> Function(Duration resumeAt) reopen,
     VoidCallback? onGiveUp,
   }) : this.withSource(
-          buffering: player.stream.buffering,
-          isBuffering: () => player.state.buffering,
-          hasMedia: () => player.state.playlist.medias.isNotEmpty,
-          position: () => player.state.position,
+          position: player.stream.position,
+          shouldWatch: () => player.state.playing && !player.state.completed,
           reopen: reopen,
           onGiveUp: onGiveUp,
         );
 
   /// Sin `Player` de por medio, para poder probar la lógica sin libmpv.
   @visibleForTesting
-  StallRecovery.withSource({
-    required Stream<bool> buffering,
-    required bool Function() isBuffering,
-    required bool Function() hasMedia,
-    required Duration Function() position,
+  PlaybackWatchdog.withSource({
+    required Stream<Duration> position,
+    required bool Function() shouldWatch,
     required this.reopen,
     this.onGiveUp,
+    this.attemptTimeouts = const [Duration(seconds: 10), Duration(seconds: 15), Duration(seconds: 20)],
     this.stallTimeout = const Duration(seconds: 12),
-    this.healthyAfter = const Duration(seconds: 5),
-    this.maxAttempts = 3,
-  })  : _isBuffering = isBuffering,
-        _hasMedia = hasMedia,
-        _position = position {
-    _sub = buffering.listen(_onBuffering);
+  }) : _shouldWatch = shouldWatch {
+    _sub = position.listen(_onPosition);
   }
 
-  final bool Function() _isBuffering;
-  final bool Function() _hasMedia;
-  final Duration Function() _position;
+  final bool Function() _shouldWatch;
   final Future<void> Function(Duration resumeAt) reopen;
   final VoidCallback? onGiveUp;
+  final List<Duration> attemptTimeouts;
   final Duration stallTimeout;
 
-  /// Tiempo sin buffering para dar la fuente por recuperada. No basta con ver `buffering=false`:
-  /// `Player.open` lo emite en cada reapertura, aunque la fuente siga caída.
-  final Duration healthyAfter;
-  final int maxAttempts;
+  final phase = ValueNotifier<PlaybackPhase>(PlaybackPhase.idle);
 
-  /// `true` mientras se está intentando recuperar la fuente.
-  final reconnecting = ValueNotifier<bool>(false);
+  /// Avance necesario para dar el video por arrancado, y salto máximo que cuenta como avance:
+  /// `Player.open` y los `seek` también mueven la posición, sin que se esté reproduciendo nada.
+  static const _startedAfter = Duration(seconds: 1);
+  static const _maxStep = Duration(seconds: 2);
 
-  late final StreamSubscription<bool> _sub;
-  Timer? _stall;
-  Timer? _healthy;
-  int _attempts = 0;
-  bool _disposed = false;
+  late final StreamSubscription<Duration> _sub;
+  Timer? _timer;
+  int _attempt = 0;
+  Duration? _last;
+  Duration _progress = Duration.zero;
+  Duration _lastGood = Duration.zero;
 
-  void _onBuffering(bool buffering) {
-    _stall?.cancel();
-    _healthy?.cancel();
-    if (buffering) {
-      _stall = Timer(stallTimeout, _recover);
-    } else {
-      _healthy = Timer(healthyAfter, () {
-        _attempts = 0;
-        reconnecting.value = false;
-      });
+  /// Aún no hay nada que vigilar (por ejemplo, se está resolviendo el servidor).
+  void connecting() {
+    _timer?.cancel();
+    phase.value = PlaybackPhase.connecting;
+  }
+
+  /// Llamar justo antes de abrir una fuente nueva.
+  void begin() {
+    _attempt = 0;
+    _last = null;
+    _progress = Duration.zero;
+    _lastGood = Duration.zero;
+    phase.value = PlaybackPhase.connecting;
+    _arm(attemptTimeouts.first);
+  }
+
+  void stop() {
+    _timer?.cancel();
+    phase.value = PlaybackPhase.idle;
+  }
+
+  void _arm(Duration timeout) {
+    _timer?.cancel();
+    _timer = Timer(timeout, _onTimeout);
+  }
+
+  void _onPosition(Duration pos) {
+    final last = _last;
+    _last = pos;
+    if (last == null) return;
+    final step = pos - last;
+    if (step <= Duration.zero || step > _maxStep) return;
+    final current = phase.value;
+    if (current == PlaybackPhase.idle || current == PlaybackPhase.failed) return;
+
+    _lastGood = pos;
+    if (current == PlaybackPhase.playing) {
+      _arm(stallTimeout);
+      return;
+    }
+    _progress += step;
+    if (_progress >= _startedAfter) {
+      _attempt = 0;
+      phase.value = PlaybackPhase.playing;
+      _arm(stallTimeout);
     }
   }
 
-  Future<void> _recover() async {
-    if (!_hasMedia()) return;
-    if (_attempts >= maxAttempts) {
-      reconnecting.value = false;
+  void _onTimeout() {
+    // Ya arrancó: una pausa del usuario o el final del video no son un atasco.
+    if (phase.value == PlaybackPhase.playing && !_shouldWatch()) {
+      _arm(stallTimeout);
+      return;
+    }
+    // Un atasco en plena reproducción empieza de nuevo por el primer reintento.
+    _attempt++;
+    if (_attempt >= attemptTimeouts.length) {
+      phase.value = PlaybackPhase.failed;
       onGiveUp?.call();
       return;
     }
-    _attempts++;
-    reconnecting.value = true;
-    try {
-      await reopen(_position());
-    } catch (_) {
-      // Si falla la reapertura, el siguiente ciclo de buffering lo vuelve a intentar.
-    }
-    if (_disposed) return;
-    // Si la fuente sigue sin llenar el buffer, se reintenta pasado otro [stallTimeout].
-    if (_isBuffering()) {
-      _stall?.cancel();
-      _stall = Timer(stallTimeout, _recover);
-    }
-  }
-
-  /// Reabre [media] y vuelve a [resumeAt] (en un directo no hay posición a la que volver).
-  static Future<void> reopenAt(Player player, Media media, Duration resumeAt) async {
-    await player.open(media);
-    if (resumeAt < const Duration(seconds: 2)) return;
-    final known = await player.stream.duration
-        .firstWhere((d) => d > Duration.zero)
-        .timeout(const Duration(seconds: 10), onTimeout: () => Duration.zero);
-    if (known > Duration.zero) await player.seek(resumeAt);
+    _progress = Duration.zero;
+    phase.value = PlaybackPhase.retrying;
+    _arm(attemptTimeouts[_attempt]);
+    reopen(_lastGood).catchError((Object _) {
+      // El temporizador ya armado cuenta este intento como fallido.
+    });
   }
 
   void dispose() {
-    _disposed = true;
-    _stall?.cancel();
-    _healthy?.cancel();
+    _timer?.cancel();
     _sub.cancel();
-    reconnecting.dispose();
+    phase.dispose();
   }
 }
 
+/// Reabre [media] y vuelve a [resumeAt] (en un directo no hay posición a la que volver).
+Future<void> reopenAt(Player player, Media media, Duration resumeAt) async {
+  await player.open(media);
+  if (resumeAt < const Duration(seconds: 2)) return;
+  final known = await player.stream.duration
+      .firstWhere((d) => d > Duration.zero)
+      .timeout(const Duration(seconds: 10), onTimeout: () => Duration.zero);
+  if (known > Duration.zero) await player.seek(resumeAt);
+}
+
 /// Logo de RoloStream en la esquina inferior derecha, al 40 % y sin capturar toques.
-/// Ocupa los 38 px inferiores, por debajo de la barra de controles (ver [_controlsBottomInset]).
 class PlayerWatermark extends StatelessWidget {
   const PlayerWatermark({super.key});
 
@@ -178,41 +231,97 @@ class PlayerWatermark extends StatelessWidget {
   }
 }
 
-/// Spinner de buffering (la reproducción no se detiene por él) y aviso de reconexión.
-class _BufferingOverlay extends StatelessWidget {
+/// Spinner con el estado de la conexión. Durante un buffering normal no lleva texto.
+class _StatusOverlay extends StatelessWidget {
   final Player player;
-  final ValueListenable<bool>? reconnecting;
-  const _BufferingOverlay({required this.player, this.reconnecting});
+  final ValueListenable<PlaybackPhase> phase;
+  final String connectingLabel;
+  const _StatusOverlay({required this.player, required this.phase, required this.connectingLabel});
+
+  Widget _spinner([String? label]) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(),
+          if (label != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(label,
+                  style: const TextStyle(
+                      color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+            ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return IgnorePointer(
-      child: StreamBuilder<bool>(
-        stream: player.stream.buffering,
-        initialData: player.state.buffering,
-        builder: (context, snap) {
-          if (snap.data != true) return const SizedBox.shrink();
-          return Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const CircularProgressIndicator(),
-                if (reconnecting != null)
-                  ValueListenableBuilder<bool>(
-                    valueListenable: reconnecting!,
-                    builder: (_, r, __) => r
-                        ? const Padding(
-                            padding: EdgeInsets.only(top: 10),
-                            child: Text('Reconectando…',
-                                style: TextStyle(fontWeight: FontWeight.w700)),
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-              ],
-            ),
+      child: ValueListenableBuilder<PlaybackPhase>(
+        valueListenable: phase,
+        builder: (context, p, _) {
+          if (p == PlaybackPhase.connecting) return _spinner(connectingLabel);
+          if (p == PlaybackPhase.retrying) return _spinner('Reintentando...');
+          if (p == PlaybackPhase.failed) return const SizedBox.shrink();
+          return StreamBuilder<bool>(
+            stream: player.stream.buffering,
+            initialData: player.state.buffering,
+            builder: (context, snap) =>
+                snap.data == true ? _spinner() : const SizedBox.shrink(),
           );
         },
       ),
+    );
+  }
+}
+
+/// Botón central de un directo: solo aparece si está parado, para volver a reproducir.
+/// Un canal en vivo no se puede pausar.
+class LivePlayButton extends StatelessWidget {
+  final Stream<bool> playing;
+  final bool initialPlaying;
+  final VoidCallback onPlay;
+  const LivePlayButton({
+    super.key,
+    required this.playing,
+    required this.initialPlaying,
+    required this.onPlay,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<bool>(
+      stream: playing,
+      initialData: initialPlaying,
+      builder: (context, snap) {
+        if (snap.data == true) return const SizedBox.shrink();
+        return IconButton(
+          tooltip: 'Reproducir',
+          iconSize: 56,
+          icon: const Icon(Icons.play_arrow_rounded, color: Colors.white),
+          onPressed: onPlay,
+        );
+      },
+    );
+  }
+}
+
+class _LiveBadge extends StatelessWidget {
+  const _LiveBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.primary,
+        borderRadius: BorderRadius.circular(2),
+      ),
+      child: const Text('EN VIVO',
+          style: TextStyle(
+              color: Colors.black, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
     );
   }
 }
@@ -302,47 +411,92 @@ class QualityButton extends StatelessWidget {
   }
 }
 
-/// Hueco bajo la barra de controles para que el botón de pantalla completa no pise la marca de agua.
-const _controlsBottomInset = 40.0;
+/// Tema de los controles. Un directo no tiene barra de progreso, ni nada para buscar o pausar.
+///
+/// No hay que tocar los márgenes inferiores: `media_kit` excluye `16 + margen + buttonBarHeight`
+/// de la zona que recibe los toques, y en la vista normal (unos 210 px de alto) cada píxel
+/// añadido deja sin respuesta una parte mayor del video.
+MaterialVideoControlsThemeData premiumControlsTheme(
+  MaterialVideoControlsThemeData base, {
+  required bool live,
+  required Widget quality,
+  required Widget livePlayButton,
+  void Function(double)? onVolumeChanged,
+  double? initialVolume,
+  void Function(double)? onBrightnessChanged,
+  double? initialBrightness,
+  void Function()? onBrightnessReset,
+}) {
+  return base.copyWith(
+    visibleOnMount: true,
+    controlsHoverDuration: const Duration(seconds: 5),
+    displaySeekBar: !live,
+    seekGesture: !live,
+    seekOnDoubleTap: !live,
+    seekOnDoubleTapEnabledWhileControlsVisible: !live,
+    speedUpOnLongPress: false,
+    volumeGesture: true,
+    brightnessGesture: true,
+    gesturesEnabledWhileControlsVisible: true,
+    onVolumeChanged: onVolumeChanged,
+    initialVolume: initialVolume,
+    onBrightnessChanged: onBrightnessChanged,
+    initialBrightness: initialBrightness,
+    onBrightnessReset: onBrightnessReset,
+    // El spinner lo pinta `_StatusOverlay`, que además dice qué está pasando.
+    bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
+    seekBarPositionColor: AppColors.primary,
+    seekBarThumbColor: AppColors.primary,
+    primaryButtonBar: live ? [livePlayButton] : null,
+    bottomButtonBar: [
+      if (live) const _LiveBadge() else const MaterialPositionIndicator(),
+      const Spacer(),
+      quality,
+      const MaterialFullscreenButton(),
+    ],
+  );
+}
 
 /// Vídeo con los controles estilo RoloStream: marca de agua, gestos (doble toque ±10 s,
-/// deslizar para volumen y brillo), selector de calidad y spinner de buffering.
-///
-/// La barra de progreso y los gestos para buscar (arrastrar, doble toque) se desactivan en los directos
-/// (los que no informan de duración).
+/// deslizar para volumen y brillo), selector de calidad y estado de la conexión.
 class PremiumVideo extends StatelessWidget {
   final Player player;
   final VideoController controller;
-  final ValueListenable<bool>? reconnecting;
+  final ValueListenable<PlaybackPhase> phase;
+
+  /// `true` directo, `false` bajo demanda, `null` lo decide la duración (0 = directo).
+  final bool? live;
+  final String connectingLabel;
+
   const PremiumVideo({
     super.key,
     required this.player,
     required this.controller,
-    this.reconnecting,
+    required this.phase,
+    required this.connectingLabel,
+    this.live,
   });
 
-  MaterialVideoControlsThemeData _theme(MaterialVideoControlsThemeData base, bool live) {
-    return base.copyWith(
-      displaySeekBar: !live,
-      seekGesture: !live,
-      seekOnDoubleTap: !live,
-      volumeGesture: true,
-      brightnessGesture: true,
-      gesturesEnabledWhileControlsVisible: true,
-      seekOnDoubleTapEnabledWhileControlsVisible: true,
-      // El spinner lo pinta `_BufferingOverlay`, que además avisa de las reconexiones.
-      bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
-      seekBarPositionColor: AppColors.primary,
-      seekBarThumbColor: AppColors.primary,
-      bottomButtonBarMargin:
-          const EdgeInsets.only(left: 16, right: 8, bottom: _controlsBottomInset),
-      seekBarMargin: const EdgeInsets.only(left: 16, right: 16, bottom: _controlsBottomInset),
-      bottomButtonBar: [
-        const MaterialPositionIndicator(),
-        const Spacer(),
-        QualityButton(player: player),
-        const MaterialFullscreenButton(),
-      ],
+  MaterialVideoControlsThemeData _theme(MaterialVideoControlsThemeData base, bool isLive) {
+    return premiumControlsTheme(
+      base,
+      live: isLive,
+      quality: QualityButton(player: player),
+      livePlayButton: LivePlayButton(
+        playing: player.stream.playing,
+        initialPlaying: player.state.playing,
+        onPlay: player.play,
+      ),
+      onVolumeChanged: (v) => player.setVolume(v * 100),
+      initialVolume: player.state.volume / 100,
+      onBrightnessChanged: (v) {
+        _appBrightness = v;
+        ScreenBrightness.instance.setApplicationScreenBrightness(v).catchError((Object _) {});
+      },
+      initialBrightness: _appBrightness,
+      onBrightnessReset: () {
+        ScreenBrightness.instance.resetApplicationScreenBrightness().catchError((Object _) {});
+      },
     );
   }
 
@@ -352,20 +506,20 @@ class PremiumVideo extends StatelessWidget {
       stream: player.stream.duration,
       initialData: player.state.duration,
       builder: (context, snap) {
-        final live = (snap.data ?? Duration.zero) == Duration.zero;
+        final isLive = live ?? (snap.data ?? Duration.zero) == Duration.zero;
         return MaterialVideoControlsTheme(
-          normal: _theme(kDefaultMaterialVideoControlsThemeData, live),
-          fullscreen: _theme(kDefaultMaterialVideoControlsThemeDataFullscreen, live),
+          normal: _theme(kDefaultMaterialVideoControlsThemeData, isLive),
+          fullscreen: _theme(kDefaultMaterialVideoControlsThemeDataFullscreen, isLive),
           child: Video(
             controller: controller,
             // Los controles también se construyen en pantalla completa: la marca de agua y el
-            // spinner viajan con ellos.
+            // estado viajan con ellos.
             controls: (state) => Stack(
               fit: StackFit.expand,
               children: [
                 const PlayerWatermark(),
                 MaterialVideoControls(state),
-                _BufferingOverlay(player: player, reconnecting: reconnecting),
+                _StatusOverlay(player: player, phase: phase, connectingLabel: connectingLabel),
               ],
             ),
           ),
