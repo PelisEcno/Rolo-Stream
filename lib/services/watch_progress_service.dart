@@ -53,6 +53,43 @@ class WatchProgress {
       );
 }
 
+/// Comprueba que el video de verdad haya arrancado donde tocaba.
+///
+/// `Media.start` no siempre se cumple (depende de la fuente, sobre todo en HLS), y mientras no se
+/// sepa no hay que guardar progreso: un arranque en 0 borraría el punto guardado.
+class ResumeGuard {
+  final Duration target;
+  ResumeGuard(this.target);
+
+  static const _tolerance = Duration(seconds: 5);
+  static const _retryAfter = Duration(seconds: 8);
+  static const _maxSeeks = 3;
+
+  bool done = false;
+  bool gaveUp = false;
+  int seeks = 0;
+  DateTime? _lastSeek;
+
+  /// Con el video ya avanzando: devuelve a dónde saltar, o `null` si no hay que hacer nada.
+  Duration? check(Duration position, DateTime now) {
+    if (done) return null;
+    if (position >= target - _tolerance) {
+      done = true;
+      return null;
+    }
+    final last = _lastSeek;
+    if (last != null && now.difference(last) < _retryAfter) return null;
+    if (seeks >= _maxSeeks) {
+      done = true;
+      gaveUp = true;
+      return null;
+    }
+    seeks++;
+    _lastSeek = now;
+    return target;
+  }
+}
+
 /// Progreso de reproducción del perfil activo, guardado en este dispositivo.
 class WatchProgressService extends ChangeNotifier {
   WatchProgressService();
