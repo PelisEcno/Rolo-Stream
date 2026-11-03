@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:rolostream_core/rolostream_core.dart';
+import '../../services/auth_service.dart';
 import '../../services/favorites_service.dart';
+import '../../services/profile_service.dart';
 import '../../services/source_registry.dart';
+import '../widgets/profile_avatar.dart';
 import '../widgets/source_picker.dart';
 import 'iptv_manager_screen.dart';
 import '../theme/app_theme.dart';
@@ -13,8 +16,6 @@ class SettingsScreen extends StatelessWidget {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surfaceHigh,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
         title: const Text('Vaciar Mi lista'),
         content: const Text('Se eliminarán todas las series guardadas. ¿Continuar?'),
         actions: [
@@ -24,6 +25,21 @@ class SettingsScreen extends StatelessWidget {
       ),
     );
     if (ok == true) await FavoritesService.instance.clear();
+  }
+
+  Future<void> _signOut(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cerrar sesión'),
+        content: const Text('Tus perfiles y tu progreso seguirán en este dispositivo.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('CANCELAR')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('CERRAR SESIÓN')),
+        ],
+      ),
+    );
+    if (ok == true) await AuthService.instance.signOut();
   }
 
   Widget _tile(IconData icon, String title, {String? subtitle, VoidCallback? onTap}) {
@@ -48,17 +64,16 @@ class SettingsScreen extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             child: Row(
               children: [
-                const CircleAvatar(
-                  radius: 32,
-                  backgroundColor: AppColors.primary,
-                  child: Icon(Icons.person_rounded, size: 36, color: Colors.black),
-                ),
+                ProfileAvatar(avatar: ProfileService.instance.active?.avatar ?? 0, size: 64),
                 const SizedBox(width: 16),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('RoloStream',
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                    Text(ProfileService.instance.active?.nombre ?? 'RoloStream',
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                    if (AuthService.instance.user?.email != null)
+                      Text(AuthService.instance.user!.email!,
+                          style: const TextStyle(color: AppColors.textMuted)),
                     ListenableBuilder(
                       listenable: FavoritesService.instance,
                       builder: (_, __) => Text(
@@ -71,6 +86,9 @@ class SettingsScreen extends StatelessWidget {
               ],
             ),
           ),
+          const Divider(height: 1),
+          _tile(Icons.switch_account_rounded, 'Cambiar de perfil',
+              onTap: ProfileService.instance.clearActive),
           const Divider(height: 1),
           _tile(Icons.delete_outline_rounded, 'Vaciar Mi lista',
               onTap: () => _clearFavorites(context)),
@@ -95,6 +113,10 @@ class SettingsScreen extends StatelessWidget {
                     applicationVersion: '0.1.0',
                     applicationLegalese: 'Reproductor de anime multiplataforma.',
                   )),
+          if (!AuthService.instance.isLocal) ...[
+            const Divider(height: 1),
+            _tile(Icons.logout_rounded, 'Cerrar sesión', onTap: () => _signOut(context)),
+          ],
         ],
       ),
     );

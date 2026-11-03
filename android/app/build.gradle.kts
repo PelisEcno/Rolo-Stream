@@ -4,6 +4,11 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Firebase: solo si el proyecto ya está conectado (`flutterfire configure` crea este archivo).
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "com.example.rolostream"
     compileSdk = flutter.compileSdkVersion

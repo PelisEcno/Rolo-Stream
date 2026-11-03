@@ -325,7 +325,7 @@ class _ChannelTile extends StatelessWidget {
       onTap: onTap,
       contentPadding: const EdgeInsets.fromLTRB(24, 2, 12, 2),
       leading: ClipRRect(
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(AppRadius.small),
         child: Container(
           width: 44,
           height: 44,

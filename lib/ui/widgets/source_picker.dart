@@ -9,7 +9,7 @@ Future<void> showSourcePicker(BuildContext context) {
     context: context,
     backgroundColor: AppColors.surface,
     shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(8))),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.sheet))),
     builder: (ctx) => SafeArea(
       child: Column(
         mainAxisSize: MainAxisSize.min,

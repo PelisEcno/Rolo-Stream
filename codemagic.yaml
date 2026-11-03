@@ -62,6 +62,15 @@ workflows:
           if [ -n "$GSI_PLIST_B64" ]; then
             echo "$GSI_PLIST_B64" | base64 --decode > ios/Runner/GoogleService-Info.plist
             echo "✅ GoogleService-Info.plist configurado"
+            # Google Sign-In cierra la app si no encuentra su esquema de URL en Info.plist.
+            PLIST=ios/Runner/Info.plist
+            GSI=ios/Runner/GoogleService-Info.plist
+            /usr/libexec/PlistBuddy -c "Add :GIDClientID string $(/usr/libexec/PlistBuddy -c 'Print :CLIENT_ID' $GSI)" $PLIST
+            /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" $PLIST
+            /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0 dict" $PLIST
+            /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleTypeRole string Editor" $PLIST
+            /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" $PLIST
+            /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string $(/usr/libexec/PlistBuddy -c 'Print :REVERSED_CLIENT_ID' $GSI)" $PLIST
           fi
 
       - name: Flutter Pub Get

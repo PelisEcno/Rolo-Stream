@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'iptv/iptv_service.dart';
+import 'services/auth_service.dart';
 import 'services/favorites_service.dart';
 import 'services/http_client.dart';
 import 'services/mediaflow_service.dart';
 import 'services/source_registry.dart';
-import 'ui/screens/home_shell.dart';
+import 'ui/screens/auth_gate.dart';
 import 'ui/theme/app_theme.dart';
 
 void main() async {
@@ -16,6 +17,7 @@ void main() async {
   await initSourceRegistry();
   await FavoritesService.instance.load();
   await IPTVService.instance.load();
+  await AuthService.instance.init();
   runApp(const RoloStreamApp());
 }
 
@@ -51,7 +53,7 @@ class _RoloStreamAppState extends State<RoloStreamApp> with WidgetsBindingObserv
       title: 'RoloStream',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark,
-      home: const HomeShell(),
+      home: const AuthGate(),
     );
   }
 }
