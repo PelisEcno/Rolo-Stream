@@ -23,6 +23,32 @@ class MediaFlowService {
   /// Puerto en el que se espera al proxy.
   static int get port => _port;
 
+  /// URL que debe abrir el reproductor. Si el proxy entrega `mediaflow_proxy_url` se usa siempre:
+  /// el manifiesto y cada segmento pasan por el proxy, que les pone los headers del extractor
+  /// (los CDN que exigen `Referer` en los segmentos devuelven 403 si FFmpeg los pide directo).
+  static ({String url, bool viaProxy}) playbackUrl({
+    required String host,
+    required String directUrl,
+    String? proxyUrl,
+  }) {
+    if (proxyUrl == null) return (url: directUrl, viaProxy: false);
+    if (host != 'zilla') return (url: proxyUrl, viaProxy: true);
+
+    // Headers que solo necesita Zilla: a otro host le pisarían el `Referer` del extractor.
+    final destUrl = Uri.parse(proxyUrl).queryParameters['d'] ?? 'https://player.zilla-networks.com/';
+    return (
+      url: '$proxyUrl'
+          '&h_referer=${Uri.encodeComponent(destUrl)}'
+          '&h_range=bytes%3D0-'
+          '&h_sec-fetch-dest=video'
+          '&h_sec-fetch-mode=cors'
+          '&h_sec-fetch-site=same-origin'
+          '&h_accept=*%2F*'
+          '&h_accept-language=en-US%2Cen%3Bq%3D0.9%2Ces%3Bq%3D0.8',
+      viaProxy: true,
+    );
+  }
+
   /// true solo si el proxy nativo respondió a `startProxy`.
   static bool get nativeRunning => _nativeRunning;
 
