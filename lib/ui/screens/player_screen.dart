@@ -42,6 +42,9 @@ class PlayerScreen extends StatefulWidget {
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
+/// Servidores con los que FFmpeg se queda clavado al saltar a un segmento sin cargar.
+const _windowHosts = {'zilla', 'byse'};
+
 class _PlayerScreenState extends State<PlayerScreen> {
   late final SourcePlugin _source =
       pluginRegistry.byId(widget.sourceId ?? '') ?? pluginRegistry.active;
@@ -177,8 +180,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       responseType: ResponseType.plain,
     ));
     try {
-      final res = await dio.get<String>(manifestUrl);
-      final playlist = HlsPlaylist.parse(res.data ?? '', Uri.parse(manifestUrl));
+      var url = manifestUrl;
+      var text = (await dio.get<String>(url)).data ?? '';
+      final variant = HlsPlaylist.bestVariant(text, Uri.parse(url));
+      if (variant != null) {
+        _log.add('[INFO] Playlist maestro: se usa la variante de mayor calidad');
+        url = variant;
+        text = (await dio.get<String>(url)).data ?? '';
+      }
+      final playlist = HlsPlaylist.parse(text, Uri.parse(url));
       if (playlist == null) {
         _log.add('[WARN] El manifiesto no admite abrirse por tramos: se abre normal');
         return false;
@@ -530,8 +540,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (unreached != null && unreached > _resume) _resume = unreached;
       _unreachedResume = null;
       if (_resume > Duration.zero) _log.add('[INFO] Reanudando en ${_resume.inSeconds}s');
-      // Zilla sirve AV1 en fMP4: FFmpeg se queda clavado al saltar a un segmento sin cargar.
-      if (viaProxy && video.host == 'zilla' && await _prepareWindow(finalUrl)) {
+      if (viaProxy && _windowHosts.contains(video.host) && await _prepareWindow(finalUrl)) {
         if (!mounted || _selected != i) return;
         _watchdog.begin();
         await _openWindow(_resume);
@@ -573,9 +582,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ? null
                   : TimelineBar(
                       position: _player.stream.position,
-                      initialPosition: _player.state.position,
-                      offset: window.offset,
-                      total: window.total,
+                      currentPosition: () => _player.state.position,
+                      window: _window,
                       onSeek: _seekTo,
                     ),
             ),

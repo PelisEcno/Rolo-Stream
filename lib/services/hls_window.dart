@@ -35,6 +35,31 @@ class HlsPlaylist {
 
   static final _uriAttr = RegExp(r'URI="([^"]*)"');
 
+  static final _bandwidth = RegExp(r'[:,]BANDWIDTH=(\d+)');
+
+  /// Si [text] es un playlist maestro, URL de la variante de mayor calidad. `null` si no lo es, o si
+  /// el audio va en una pista aparte: habría que recortar las dos a la par, y no se intenta.
+  static String? bestVariant(String text, Uri base) {
+    final lines = const LineSplitter().convert(text);
+    final separateAudio = lines
+        .any((l) => l.startsWith('#EXT-X-MEDIA:') && l.contains('TYPE=AUDIO') && l.contains('URI='));
+    if (separateAudio) return null;
+
+    String? best;
+    var bestRate = -1;
+    for (var i = 0; i + 1 < lines.length; i++) {
+      if (!lines[i].startsWith('#EXT-X-STREAM-INF')) continue;
+      final uri = lines[i + 1];
+      if (uri.isEmpty || uri.startsWith('#')) continue;
+      final rate = int.tryParse(_bandwidth.firstMatch(lines[i])?.group(1) ?? '') ?? 0;
+      if (rate > bestRate) {
+        bestRate = rate;
+        best = uri;
+      }
+    }
+    return best == null ? null : base.resolve(best).toString();
+  }
+
   /// Devuelve `null` si no es un playlist al que se le pueda aplicar esto: uno maestro, un directo,
   /// o uno con etiquetas cuyo efecto depende de los segmentos anteriores.
   static HlsPlaylist? parse(String text, Uri base) {
