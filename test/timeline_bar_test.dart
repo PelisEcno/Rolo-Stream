@@ -280,6 +280,24 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('el spinner no se queda girando si la carga termina mientras conecta',
+        (tester) async {
+      // Lo que pasa de verdad: los controles se crean cargando...
+      phase.value = PlaybackPhase.connecting;
+      model.isBuffering = true;
+      await tester.pumpWidget(view());
+
+      // ...la carga termina antes de pasar a reproducir...
+      model.emitBuffering(false);
+      await tester.pump();
+
+      // ...y al reproducir no debe quedar nada encima del video.
+      phase.value = PlaybackPhase.playing;
+      await tester.pump();
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      await finish(tester);
+    });
+
     testWidgets('el botón de calidad solo aparece con varias y deja elegir', (tester) async {
       await tester.pumpWidget(view());
       expect(find.byTooltip('Calidad'), findsNothing);

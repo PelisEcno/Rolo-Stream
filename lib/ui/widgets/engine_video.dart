@@ -292,7 +292,7 @@ class _EngineVideoViewState extends State<EngineVideoView> {
             ),
             PlaybackStatusOverlay(
               buffering: _model.bufferingStream,
-              initialBuffering: _model.buffering,
+              isBuffering: () => _model.buffering,
               phase: widget.phase,
               connectingLabel: widget.connectingLabel,
             ),
