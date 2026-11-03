@@ -160,6 +160,25 @@ void main() {
       expect(g.gaveUp, isTrue);
     });
 
+    test('el primer atasco reintenta y el segundo abre desde el inicio', () {
+      final g = ResumeGuard(target);
+      expect(g.shouldFallBackToStart(), isFalse);
+      expect(g.shouldFallBackToStart(), isTrue);
+    });
+
+    test('si ya llegó al punto, un atasco posterior no vuelve al inicio', () {
+      final g = ResumeGuard(target);
+      g.check(target, t0);
+      expect(g.shouldFallBackToStart(), isFalse);
+      expect(g.shouldFallBackToStart(), isFalse);
+    });
+
+    test('sin punto guardado nunca hay vuelta al inicio', () {
+      final g = ResumeGuard(Duration.zero);
+      expect(g.shouldFallBackToStart(), isFalse);
+      expect(g.shouldFallBackToStart(), isFalse);
+    });
+
     test('sin punto guardado no interviene', () {
       final g = ResumeGuard(Duration.zero);
       expect(g.check(const Duration(seconds: 1), t0), isNull);

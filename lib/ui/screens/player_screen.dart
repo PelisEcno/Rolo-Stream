@@ -50,9 +50,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late final PlaybackWatchdog _watchdog = PlaybackWatchdog(
     _player,
     reopen: (at) async {
-      _log.add('[WARN] El video no avanza: se reabre en ${at.inSeconds}s');
+      if (_guard.shouldFallBackToStart()) {
+        await _openFromStart();
+        return;
+      }
       // Si aún no se llegó al punto guardado, `at` es anterior a él.
-      await reopenAt(_player, _media!, at > _resume ? at : _resume);
+      final target = at > _resume ? at : _resume;
+      _log.add('[WARN] El video no avanza: se reabre en ${target.inSeconds}s');
+      await reopenAt(_player, _media!, target);
     },
     onGiveUp: () {
       if (!mounted) return;
@@ -69,6 +74,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       Duration.zero;
   Timer? _progressTimer;
   ResumeGuard _guard = ResumeGuard(Duration.zero);
+
+  /// Punto guardado al que este servidor no pudo llegar: no se pisa hasta superarlo, para poder
+  /// retomarlo con otro servidor.
+  Duration? _unreachedResume;
   bool _durationLogged = false;
   int _av1Errors = 0;
   int _av1ErrorsLogged = 0;
@@ -119,6 +128,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _load();
   }
 
+  Future<void> _openFromStart() async {
+    final saved = _resume;
+    _log.add('[WARN] No arrancó en ${saved.inSeconds}s: se abre desde el inicio');
+    _unreachedResume = saved;
+    _resume = Duration.zero;
+    _guard = ResumeGuard(Duration.zero);
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(
+            content: Text('Este servidor no pudo retomar donde ibas: empieza desde el inicio. '
+                'Con otro servidor puedes retomarlo.')));
+    }
+    final old = _media!;
+    _media = Media(old.uri, httpHeaders: old.httpHeaders);
+    await _player.open(_media!);
+  }
+
   /// Con el video ya avanzando, salta al punto guardado si `Media.start` no se cumplió.
   void _verifyResume(Duration position) {
     if (_watchdog.phase.value != PlaybackPhase.playing) return;
@@ -154,6 +181,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final position = _player.state.position;
     if (position == _resume) return;
     _resume = position;
+    final unreached = _unreachedResume;
+    if (unreached != null) {
+      if (position <= unreached) return;
+      _unreachedResume = null;
+    }
     WatchProgressService.instance.save(
       sourceId: _source.id,
       slug: widget.slug,
@@ -396,6 +428,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
       _log.add('[PLAY] media_kit open${viaProxy ? ' (vía proxy)' : ''}: '
           '${DebugLog.short(finalUrl.replaceAll(MediaFlowService.apiPassword, '***'))}');
+      final unreached = _unreachedResume;
+      if (unreached != null && unreached > _resume) _resume = unreached;
+      _unreachedResume = null;
       if (_resume > Duration.zero) _log.add('[INFO] Reanudando en ${_resume.inSeconds}s');
       _guard = ResumeGuard(_resume);
       _durationLogged = false;
