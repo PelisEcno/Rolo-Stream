@@ -35,6 +35,10 @@ class _IPTVPlayerScreenState extends State<IPTVPlayerScreen> {
 
   String? _error;
   StreamSubscription<Tracks>? _tracksSub;
+  StreamSubscription<bool>? _playingSub;
+  Timer? _resumeTimer;
+
+  bool get _isLiveNow => widget.channel.isLive ?? (_player.state.duration == Duration.zero);
 
   Media get _media => Media(widget.channel.url,
       httpHeaders: widget.channel.headers.isEmpty ? null : widget.channel.headers);
@@ -43,21 +47,36 @@ class _IPTVPlayerScreenState extends State<IPTVPlayerScreen> {
   void initState() {
     super.initState();
     _tracksSub = _player.stream.tracks.listen(_ensureLiveAudio);
+    _playingSub = _player.stream.playing.listen(_keepLivePlaying);
+    // Antes de abrir: `Player.open` solo espera al controlador si ya existe. Sin él, abre el canal y
+    // el controlador llega después a reiniciar la salida de video con el canal ya en marcha.
+    _controller;
     _open();
   }
 
   @override
   void dispose() {
     _tracksSub?.cancel();
+    _playingSub?.cancel();
+    _resumeTimer?.cancel();
     _watchdog.dispose();
     _player.dispose();
     super.dispose();
   }
 
+  /// Un directo no tiene botón de pausa: si se detiene, no lo pidió nadie. Se espera un momento porque
+  /// `Player.open` pasa por pausa cada vez que abre.
+  void _keepLivePlaying(bool playing) {
+    _resumeTimer?.cancel();
+    if (playing || !_isLiveNow) return;
+    _resumeTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted && _error == null && !_player.state.playing) _player.play();
+    });
+  }
+
   /// En un directo se fija la pista de audio en cuanto mpv conoce las pistas (también al reabrir).
   void _ensureLiveAudio(Tracks tracks) {
-    final live = widget.channel.isLive ?? (_player.state.duration == Duration.zero);
-    if (!live) return;
+    if (!_isLiveNow) return;
     final track = liveAudioTrackToForce(tracks, _player.state.track);
     if (track != null) _player.setAudioTrack(track);
   }
