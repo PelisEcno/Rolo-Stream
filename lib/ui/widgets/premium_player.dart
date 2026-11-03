@@ -258,13 +258,16 @@ class PlayerWatermark extends StatelessWidget {
 /// Spinner con el estado de la conexión. Durante un buffering normal no lleva texto.
 class PlaybackStatusOverlay extends StatelessWidget {
   final Stream<bool> buffering;
-  final bool initialBuffering;
+
+  /// Se lee al mostrar el spinner, no al crear el widget: esto se construye mientras el video aún
+  /// carga y el aviso de que ya cargó puede llegar antes de empezar a escuchar [buffering].
+  final bool Function() isBuffering;
   final ValueListenable<PlaybackPhase> phase;
   final String connectingLabel;
   const PlaybackStatusOverlay({
     super.key,
     required this.buffering,
-    required this.initialBuffering,
+    required this.isBuffering,
     required this.phase,
     required this.connectingLabel,
   });
@@ -298,7 +301,7 @@ class PlaybackStatusOverlay extends StatelessWidget {
           if (p == PlaybackPhase.failed) return const SizedBox.shrink();
           return StreamBuilder<bool>(
             stream: buffering,
-            initialData: initialBuffering,
+            initialData: isBuffering(),
             builder: (context, snap) => snap.data == true ? _spinner() : const SizedBox.shrink(),
           );
         },
@@ -636,7 +639,7 @@ class PremiumVideo extends StatelessWidget {
                 MaterialVideoControls(state),
                 PlaybackStatusOverlay(
                   buffering: player.stream.buffering,
-                  initialBuffering: player.state.buffering,
+                  isBuffering: () => player.state.buffering,
                   phase: phase,
                   connectingLabel: connectingLabel,
                 ),

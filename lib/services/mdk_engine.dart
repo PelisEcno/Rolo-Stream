@@ -36,6 +36,7 @@ class MdkEngine implements PlaybackModel {
   Timer? _ticker;
   bool _buffering = false;
   bool _completed = false;
+  bool _loaded = false;
   bool _disposed = false;
 
   /// El proxy o el servidor no pudieron abrir el video.
@@ -58,7 +59,11 @@ class MdkEngine implements PlaybackModel {
   @override
   Duration get position => Duration(milliseconds: _player.position);
   @override
-  Duration get duration => Duration(milliseconds: _player.mediaInfo.duration);
+  Duration get duration => _duration;
+
+  /// `mediaInfo` reconstruye toda la información del video en cada lectura, y la duración se pide
+  /// varias veces por segundo: se guarda al cargar.
+  Duration _duration = Duration.zero;
   @override
   Stream<bool> get bufferingStream => _bufferingEvents.stream;
   @override
@@ -78,11 +83,16 @@ class MdkEngine implements PlaybackModel {
     }
     _completed = status.test(mdk.MediaStatus.end);
     if (status.test(mdk.MediaStatus.invalid)) _errors.add('Failed to open: fvp invalid media');
-    if (status.test(mdk.MediaStatus.loaded)) _readTracks();
+    final loaded = status.test(mdk.MediaStatus.loaded);
+    // Solo al pasar a cargado: el estado cambia muchas veces durante la reproducción.
+    if (loaded && !_loaded) _readTracks();
+    _loaded = loaded;
   }
 
   void _readTracks() {
-    final videos = _player.mediaInfo.video ?? const [];
+    final info = _player.mediaInfo;
+    _duration = Duration(milliseconds: info.duration);
+    final videos = info.video ?? const [];
     if (videos.isEmpty) return;
     final codec = videos.first.codec;
     if (codec.width > 0 && codec.height > 0) aspectRatio.value = codec.width / codec.height;
@@ -97,6 +107,7 @@ class MdkEngine implements PlaybackModel {
   Future<void> open(String url, {Duration start = Duration.zero}) async {
     _completed = false;
     _activeQuality = null;
+    _duration = Duration.zero;
     _player.state = mdk.PlaybackState.stopped;
     _player.media = url;
     unawaited(_player.updateTexture().catchError((Object _) => -1));
