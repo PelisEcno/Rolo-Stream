@@ -51,7 +51,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _player,
     reopen: (at) async {
       _log.add('[WARN] El video no avanza: se reabre en ${at.inSeconds}s');
-      await reopenAt(_player, _media!, at);
+      // Si aún no se llegó al punto guardado, `at` es anterior a él.
+      await reopenAt(_player, _media!, at > _resume ? at : _resume);
     },
     onGiveUp: () {
       if (!mounted) return;
@@ -67,6 +68,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
           .resumePoint(_source.id, widget.slug, widget.numero) ??
       Duration.zero;
   Timer? _progressTimer;
+  ResumeGuard _guard = ResumeGuard(Duration.zero);
+  bool _durationLogged = false;
 
   List<VideoServer> _servers = [];
   int _selected = 0;
@@ -103,13 +106,38 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (mounted) setState(() => _playError = null);
       }
     });
+    _player.stream.position.listen(_verifyResume);
     _progressTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
     _load();
+  }
+
+  /// Con el video ya avanzando, salta al punto guardado si `Media.start` no se cumplió.
+  void _verifyResume(Duration position) {
+    if (_watchdog.phase.value != PlaybackPhase.playing) return;
+    final duration = _player.state.duration;
+    if (!_durationLogged) {
+      _durationLogged = true;
+      _log.add(duration > Duration.zero
+          ? '[INFO] Duración: ${duration.inSeconds}s, arranca en ${position.inSeconds}s'
+          : '[WARN] El servidor no informa la duración: no se puede guardar ni reanudar');
+    }
+    if (duration <= Duration.zero) return;
+
+    final jump = _guard.check(position, DateTime.now());
+    if (jump != null) {
+      _log.add('[WARN] Arrancó en ${position.inSeconds}s en vez de ${jump.inSeconds}s: '
+          'se salta (intento ${_guard.seeks})');
+      _player.seek(jump);
+    } else if (_guard.gaveUp) {
+      _guard.gaveUp = false;
+      _log.add('[WARN] Este servidor no permitió saltar a ${_guard.target.inSeconds}s');
+    }
   }
 
   void _saveProgress() {
     // Solo con el video avanzando: al abrir o reabrir, la posición pasa un momento por 0.
     if (_watchdog.phase.value != PlaybackPhase.playing) return;
+    if (!_guard.done) return;
     final position = _player.state.position;
     if (position == _resume) return;
     _resume = position;
@@ -356,6 +384,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _log.add('[PLAY] media_kit open${viaProxy ? ' (vía proxy)' : ''}: '
           '${DebugLog.short(finalUrl.replaceAll(MediaFlowService.apiPassword, '***'))}');
       if (_resume > Duration.zero) _log.add('[INFO] Reanudando en ${_resume.inSeconds}s');
+      _guard = ResumeGuard(_resume);
+      _durationLogged = false;
       _media = Media(
         finalUrl,
         httpHeaders: viaProxy ? null : video.headers,

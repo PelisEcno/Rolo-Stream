@@ -118,6 +118,55 @@ void main() {
     });
   });
 
+  group('ResumeGuard', () {
+    final t0 = DateTime(2026, 11, 3, 12);
+    const target = Duration(minutes: 10);
+
+    test('si arrancó donde tocaba no hace nada', () {
+      final g = ResumeGuard(target);
+      expect(g.check(const Duration(minutes: 10, seconds: 1), t0), isNull);
+      expect(g.done, isTrue);
+      expect(g.seeks, 0);
+    });
+
+    test('un arranque poco antes del punto (HLS cae al inicio del segmento) vale', () {
+      final g = ResumeGuard(target);
+      expect(g.check(const Duration(minutes: 9, seconds: 57), t0), isNull);
+      expect(g.done, isTrue);
+    });
+
+    test('si arrancó en 0 salta y no guarda hasta llegar', () {
+      final g = ResumeGuard(target);
+      expect(g.check(const Duration(seconds: 1), t0), target);
+      expect(g.done, isFalse);
+      // Mientras el salto carga no se repite.
+      expect(g.check(const Duration(seconds: 2), t0.add(const Duration(seconds: 3))), isNull);
+      expect(g.seeks, 1);
+      expect(g.check(target, t0.add(const Duration(seconds: 4))), isNull);
+      expect(g.done, isTrue);
+      expect(g.gaveUp, isFalse);
+    });
+
+    test('si el salto no surte efecto reintenta y al final se rinde', () {
+      final g = ResumeGuard(target);
+      var now = t0;
+      var jumps = 0;
+      for (var i = 0; i < 40; i++) {
+        if (g.check(Duration(seconds: i), now) != null) jumps++;
+        now = now.add(const Duration(seconds: 1));
+      }
+      expect(jumps, 3);
+      expect(g.done, isTrue);
+      expect(g.gaveUp, isTrue);
+    });
+
+    test('sin punto guardado no interviene', () {
+      final g = ResumeGuard(Duration.zero);
+      expect(g.check(const Duration(seconds: 1), t0), isNull);
+      expect(g.done, isTrue);
+    });
+  });
+
   group('ProfileService', () {
     late ProfileService svc;
     setUp(() async {
