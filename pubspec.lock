@@ -14,7 +14,7 @@ packages:
     description:
       path: "."
       ref: main
-      resolved-ref: "7cfb25e40b4f396297b8e3884610859cd746f04e"
+      resolved-ref: "0b291ab2ca101ddb81f4603efcc9f709d32d6ea9"
       url: "https://github.com/PelisEcno/rolostream-plugin-animeav1"
     source: git
     version: "1.0.0"
@@ -23,7 +23,7 @@ packages:
     description:
       path: "."
       ref: main
-      resolved-ref: "2ef57b84841842373984e38ca71481147aecea3f"
+      resolved-ref: "0966e15bf0dcd7eab851b0f177a5f0397c52ce0b"
       url: "https://github.com/PelisEcno/rolostream-plugin-animedlatino"
     source: git
     version: "1.0.0"
@@ -152,7 +152,7 @@ packages:
     description:
       path: "."
       ref: main
-      resolved-ref: "021fceb221a0c22d5cf375ed779f026e74854b60"
+      resolved-ref: "8e203ff365d636a01ee9cc6361be403937d5f21f"
       url: "https://github.com/PelisEcno/rolostream-plugin-cuevana"
     source: git
     version: "1.0.0"
@@ -424,7 +424,7 @@ packages:
     description:
       path: "."
       ref: main
-      resolved-ref: "0fd7af9f666ac9602d6a861e073451d583f88e65"
+      resolved-ref: "2cb384c2b52d7928c93b9be4e663d2ba2e2c5a12"
       url: "https://github.com/PelisEcno/rolostream-plugin-jkanime"
     source: git
     version: "1.0.0"
@@ -706,7 +706,7 @@ packages:
     description:
       path: "."
       ref: main
-      resolved-ref: b5649f5b380e0658b05d1976e4f1bc2bccab191c
+      resolved-ref: b250f596492ce71f289a92bafa49dbcbeb3711e4
       url: "https://github.com/PelisEcno/rolostream-plugin-pelisplushd"
     source: git
     version: "1.0.0"
@@ -1009,7 +1009,7 @@ packages:
     description:
       path: "."
       ref: main
-      resolved-ref: "78e93b4bf574e93f5a60d7a2e94f59e664525b17"
+      resolved-ref: "5e564c78f5676d7d563cb0d7291c1039c42b126b"
       url: "https://github.com/PelisEcno/rolostream-plugin-tioanime"
     source: git
     version: "1.0.0"
