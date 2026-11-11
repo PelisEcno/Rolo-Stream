@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:video_player/video_player.dart' show VideoFormat;
 import 'package:rolostream/services/exo_engine.dart';
 import 'package:rolostream/ui/theme/app_theme.dart';
 import 'package:rolostream/ui/widgets/engine_video.dart';
@@ -89,12 +88,12 @@ void main() {
 
   group('ExoPlayer: formato del stream', () {
     test('HLS por extensión o por la ruta del proxy', () {
-      expect(exoFormatFor('https://cdn/x/master.m3u8?t=1'), VideoFormat.hls);
-      expect(exoFormatFor('http://127.0.0.1:8888/proxy/hls/manifest.m3u8?d=x'), VideoFormat.hls);
+      expect(exoFormatFor('https://cdn/x/master.m3u8?t=1'), 'hls');
+      expect(exoFormatFor('http://127.0.0.1:8888/proxy/hls/manifest.m3u8?d=x'), 'hls');
     });
 
     test('DASH y archivos normales', () {
-      expect(exoFormatFor('https://cdn/x/stream.mpd'), VideoFormat.dash);
+      expect(exoFormatFor('https://cdn/x/stream.mpd'), 'dash');
       expect(exoFormatFor('http://127.0.0.1:8888/proxy/stream?d=https%3A%2F%2Fa%2Fv.mp4'), isNull);
       expect(exoFormatFor('https://cdn/video.mp4'), isNull);
     });
@@ -242,7 +241,9 @@ void main() {
       expect(opacity(), 0);
 
       await tester.tapAt(at(tester, 195, 60));
-      await tester.pump(const Duration(milliseconds: 350)); // espera por si es doble toque
+      // Sin esperar al posible segundo toque: la animación ya arrancó en el mismo fotograma.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
       expect(opacity(), 1);
       await finish(tester);
     });

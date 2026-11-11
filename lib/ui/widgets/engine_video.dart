@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show kDoubleTapTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
@@ -90,7 +91,7 @@ class _EngineVideoViewState extends State<EngineVideoView> {
   Timer? _hideTimer;
   Timer? _flashTimer;
   String? _flash;
-  double _tapX = 0;
+  Timer? _tapWindow;
   double _width = 1;
   late double _brightness = currentAppBrightness() ?? 0.5;
 
@@ -106,6 +107,7 @@ class _EngineVideoViewState extends State<EngineVideoView> {
   void dispose() {
     _hideTimer?.cancel();
     _flashTimer?.cancel();
+    _tapWindow?.cancel();
     if (!widget.fullscreen) resetAppBrightness();
     super.dispose();
   }
@@ -144,10 +146,22 @@ class _EngineVideoViewState extends State<EngineVideoView> {
     _showFlash(delta.isNegative ? '-10 s' : '+10 s');
   }
 
-  void _onDoubleTap() {
+  /// Un `onDoubleTap` retrasaría cada toque simple 300 ms esperando el segundo. Aquí el toque
+  /// responde al instante y, si llega otro enseguida en un lateral, deshace el cambio y salta.
+  void _onTapUp(TapUpDetails d) {
+    final second = _tapWindow?.isActive ?? false;
+    _tapWindow?.cancel();
+    _tapWindow = Timer(kDoubleTapTimeout, () {});
+    final x = d.localPosition.dx;
     final third = _width / 3;
-    if (_tapX > third && _tapX < _width - third) return;
-    _skipBy(_tapX >= _width - third ? _skip : -_skip);
+    final side = x <= third ? -1 : (x >= _width - third ? 1 : 0);
+    if (second && side != 0) {
+      _tapWindow?.cancel();
+      _toggleControls();
+      _skipBy(side > 0 ? _skip : -_skip);
+      return;
+    }
+    _toggleControls();
   }
 
   void _onVerticalDrag(DragUpdateDetails d) {
@@ -410,9 +424,7 @@ class _EngineVideoViewState extends State<EngineVideoView> {
             const PlayerWatermark(),
             GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: _toggleControls,
-              onDoubleTapDown: (d) => _tapX = d.localPosition.dx,
-              onDoubleTap: _onDoubleTap,
+              onTapUp: _onTapUp,
               onVerticalDragUpdate: _onVerticalDrag,
             ),
             IgnorePointer(

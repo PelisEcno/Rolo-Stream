@@ -10,6 +10,7 @@ class MainActivity : FlutterActivity() {
 
     private val CHANNEL = "com.rolostream/mediaflow"
     private lateinit var proxyManager: ProxyManager
+    private var videoPlayers: NativeVideoPlayer? = null
 
     companion object {
         private const val TAG = "MainActivity"
@@ -38,6 +39,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        videoPlayers = NativeVideoPlayer(this, flutterEngine.dartExecutor.binaryMessenger, flutterEngine.renderer)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -78,6 +80,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        videoPlayers?.disposeAll()
         if (::proxyManager.isInitialized) {
             proxyManager.stop()
         }

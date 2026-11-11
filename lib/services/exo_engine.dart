@@ -1,36 +1,48 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:video_player/video_player.dart';
+import 'package:flutter/services.dart';
 import '../ui/widgets/engine_video.dart';
 import '../ui/widgets/premium_player.dart';
 
-/// HLS o DASH según la URL; `null` deja que ExoPlayer lo detecte. Las URLs del proxy no siempre
+/// `hls` o `dash` según la URL; `null` deja que ExoPlayer lo detecte. Las URLs del proxy no siempre
 /// terminan en `.m3u8`, y sin la pista ExoPlayer las trataría como un archivo normal.
-VideoFormat? exoFormatFor(String url) {
+String? exoFormatFor(String url) {
   final path = (Uri.tryParse(url)?.path ?? url).toLowerCase();
-  if (path.contains('.m3u8') || path.contains('/proxy/hls/')) return VideoFormat.hls;
-  if (path.contains('.mpd') || path.contains('/proxy/mpd/')) return VideoFormat.dash;
+  if (path.contains('.m3u8') || path.contains('/proxy/hls/')) return 'hls';
+  if (path.contains('.mpd') || path.contains('/proxy/mpd/')) return 'dash';
   return null;
 }
 
-/// Motor de video para Android: Media3/ExoPlayer a través de `video_player`.
+const _methods = MethodChannel('com.rolostream/exo');
+final Stream<Map<Object?, Object?>> _events = const EventChannel('com.rolostream/exo/events')
+    .receiveBroadcastStream()
+    .cast<Map<Object?, Object?>>();
+
+/// Motor de video para Android: Media3/ExoPlayer nativo (`NativeVideoPlayer.kt`) dibujado en una
+/// textura. Los controles los pone Flutter.
 class ExoEngine implements VideoEngine {
   ExoEngine({this.onLog}) {
     loadAppBrightness();
+    _subscription = _events.listen(_onEvent);
+    _ready = _methods.invokeMethod<int>('create').then((id) => _textureId.value = id);
   }
 
   final void Function(String)? onLog;
-  final _controller = ValueNotifier<VideoPlayerController?>(null);
+  late final StreamSubscription<Map<Object?, Object?>> _subscription;
+  late final Future<int?> _ready;
+  final _textureId = ValueNotifier<int?>(null);
+  final _aspect = ValueNotifier<double?>(null);
   final _positions = StreamController<Duration>.broadcast();
   final _bufferingEvents = StreamController<bool>.broadcast();
   final _errors = StreamController<String>.broadcast();
-  List<VideoAudioTrack> _tracks = const [];
-  int _generation = 0;
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
   bool _buffering = false;
-  bool _reportedError = false;
+  bool _completed = false;
+  bool _disposed = false;
   double _volume = 1;
-  Duration _lastPosition = Duration.zero;
+  int? _activeQuality;
 
   @override
   String get name => 'exoplayer';
@@ -45,20 +57,18 @@ class ExoEngine implements VideoEngine {
   @override
   int? activeAudioTrack;
   @override
-  int? get activeQuality => null;
-
-  VideoPlayerValue? get _value => _controller.value?.value;
+  int? get activeQuality => _activeQuality;
 
   @override
   Stream<String> get errors => _errors.stream;
   @override
-  bool get completed => _value?.isCompleted ?? false;
+  bool get completed => _completed;
   @override
   Stream<Duration> get positionStream => _positions.stream;
   @override
-  Duration get position => _value?.position ?? Duration.zero;
+  Duration get position => _position;
   @override
-  Duration get duration => _value?.duration ?? Duration.zero;
+  Duration get duration => _duration;
   @override
   Stream<bool> get bufferingStream => _bufferingEvents.stream;
   @override
@@ -68,7 +78,13 @@ class ExoEngine implements VideoEngine {
   @override
   set volume(double value) {
     _volume = value;
-    _controller.value?.setVolume(value);
+    _call('volume', {'value': value});
+  }
+
+  Future<void> _call(String method, [Map<String, Object?> args = const {}]) async {
+    final id = await _ready;
+    if (id == null || _disposed) return;
+    await _methods.invokeMethod<void>(method, {'id': id, ...args});
   }
 
   void _setBuffering(bool value) {
@@ -77,129 +93,109 @@ class ExoEngine implements VideoEngine {
     _bufferingEvents.add(value);
   }
 
-  void _onValue() {
-    final v = _value;
-    if (v == null) return;
-    playing.value = v.isPlaying;
-    _setBuffering(v.isBuffering || !v.isInitialized);
-    if (v.position != _lastPosition) {
-      _lastPosition = v.position;
-      _positions.add(v.position);
-    }
-    if (v.hasError && !_reportedError) {
-      _reportedError = true;
-      _errors.add(v.errorDescription ?? 'ExoPlayer: error desconocido');
+  void _onEvent(Map<Object?, Object?> e) {
+    if (_disposed || e['id'] != _textureId.value) return;
+    switch (e['type']) {
+      case 'position':
+        final position = Duration(milliseconds: e['position'] as int);
+        _duration = Duration(milliseconds: e['duration'] as int);
+        if (position != _position) {
+          _position = position;
+          _positions.add(position);
+        }
+      case 'state':
+        _setBuffering(e['buffering'] as bool);
+        _completed = e['ended'] as bool;
+      case 'playing':
+        playing.value = e['value'] as bool;
+      case 'size':
+        _aspect.value = (e['aspect'] as num).toDouble();
+      case 'firstFrame':
+        onLog?.call('[INFO] exoplayer: primer fotograma');
+      case 'error':
+        _setBuffering(false);
+        _errors.add(e['message'] as String);
+      case 'tracks':
+        final audio = (e['audio'] as List).cast<String>();
+        audioTracks.value = [for (var i = 0; i < audio.length; i++) QualityOption(i, audio[i])];
+        final audioSelected = e['audioSelected'] as int;
+        activeAudioTrack = audioSelected < 0 ? null : audioSelected;
+        final labels = (e['qualities'] as List).cast<String>();
+        qualities.value = labels.length < 2
+            ? const []
+            : [const QualityOption(-1, 'Auto'), for (var i = 0; i < labels.length; i++) QualityOption(i, labels[i])];
+        final qualitySelected = e['qualitySelected'] as int;
+        _activeQuality ??= qualitySelected;
     }
   }
 
   @override
   Future<void> open(String url, {Duration start = Duration.zero, Map<String, String>? headers}) async {
-    final generation = ++_generation;
-    _release();
-    _reportedError = false;
-    _lastPosition = Duration.zero;
-    audioTracks.value = const [];
+    _completed = false;
+    _position = start;
+    _duration = Duration.zero;
+    _activeQuality = null;
     activeAudioTrack = null;
+    audioTracks.value = const [];
+    qualities.value = const [];
     _setBuffering(true);
-
-    final controller = VideoPlayerController.networkUrl(
-      Uri.parse(url),
-      formatHint: exoFormatFor(url),
-      httpHeaders: headers ?? const {},
-    );
-    controller.addListener(_onValue);
-    _controller.value = controller;
-    try {
-      await controller.initialize();
-      if (generation != _generation) return;
-      if (start > Duration.zero) await controller.seekTo(start);
-      await controller.setVolume(_volume);
-      await controller.setPlaybackSpeed(speed.value);
-      await controller.play();
-      unawaited(_loadAudioTracks(controller, generation));
-    } catch (e) {
-      if (generation != _generation) return;
-      _setBuffering(false);
-      if (!_reportedError) {
-        _reportedError = true;
-        _errors.add(e.toString());
-      }
-    }
-  }
-
-  Future<void> _loadAudioTracks(VideoPlayerController controller, int generation) async {
-    try {
-      if (!controller.isAudioTrackSupportAvailable()) return;
-      final tracks = await controller.getAudioTracks();
-      if (generation != _generation) return;
-      _tracks = tracks;
-      audioTracks.value = [
-        for (var i = 0; i < tracks.length; i++)
-          QualityOption(i, tracks[i].label ?? tracks[i].language ?? 'Pista ${i + 1}'),
-      ];
-      final selected = tracks.indexWhere((t) => t.isSelected);
-      activeAudioTrack = selected < 0 ? null : selected;
-    } catch (e) {
-      onLog?.call('[WARN] exoplayer: no se pudieron leer las pistas de audio');
-    }
-  }
-
-  void _release() {
-    final old = _controller.value;
-    if (old == null) return;
-    old.removeListener(_onValue);
-    _controller.value = null;
-    old.dispose();
+    await _call('speed', {'value': speed.value});
+    await _call('volume', {'value': _volume});
+    await _call('open', {
+      'url': url,
+      'headers': headers ?? const <String, String>{},
+      'startMs': start.inMilliseconds,
+      'format': exoFormatFor(url),
+    });
   }
 
   @override
   void stop() {
-    _generation++;
-    _release();
     playing.value = false;
+    _call('stop');
   }
 
   @override
-  void play() => _controller.value?.play();
+  void play() => _call('play');
   @override
-  void pause() => _controller.value?.pause();
+  void pause() => _call('pause');
 
   @override
   Future<void> seek(Duration position) async {
-    await _controller.value?.seekTo(position);
+    _position = position;
     _positions.add(position);
+    await _call('seek', {'ms': position.inMilliseconds});
   }
 
   @override
   void setSpeed(double value) {
     speed.value = value;
-    _controller.value?.setPlaybackSpeed(value);
+    _call('speed', {'value': value});
   }
 
   @override
-  void selectQuality(int id) {}
+  void selectQuality(int id) {
+    _activeQuality = id;
+    _call('quality', {'index': id});
+  }
 
   @override
   void selectAudioTrack(int id) {
-    if (id < 0 || id >= _tracks.length) return;
     activeAudioTrack = id;
-    _controller.value?.selectAudioTrack(_tracks[id].id);
+    _call('audio', {'index': id});
   }
 
   @override
   Widget surface() {
-    return ValueListenableBuilder<VideoPlayerController?>(
-      valueListenable: _controller,
-      builder: (context, controller, _) {
-        if (controller == null) return const SizedBox.expand();
-        return ValueListenableBuilder<VideoPlayerValue>(
-          valueListenable: controller,
-          builder: (context, value, _) {
-            if (!value.isInitialized) return const SizedBox.expand();
-            return Center(
-              child: AspectRatio(aspectRatio: value.aspectRatio, child: VideoPlayer(controller)),
-            );
-          },
+    return ValueListenableBuilder<int?>(
+      valueListenable: _textureId,
+      builder: (context, id, _) {
+        if (id == null) return const SizedBox.expand();
+        return ValueListenableBuilder<double?>(
+          valueListenable: _aspect,
+          builder: (context, ratio, _) => Center(
+            child: AspectRatio(aspectRatio: ratio ?? 16 / 9, child: Texture(textureId: id)),
+          ),
         );
       },
     );
@@ -207,8 +203,11 @@ class ExoEngine implements VideoEngine {
 
   @override
   void dispose() {
-    _generation++;
-    _release();
+    _disposed = true;
+    _ready.then((id) {
+      if (id != null) _methods.invokeMethod<void>('dispose', {'id': id});
+    });
+    _subscription.cancel();
     _positions.close();
     _bufferingEvents.close();
     _errors.close();
@@ -216,6 +215,7 @@ class ExoEngine implements VideoEngine {
     speed.dispose();
     qualities.dispose();
     audioTracks.dispose();
-    _controller.dispose();
+    _textureId.dispose();
+    _aspect.dispose();
   }
 }

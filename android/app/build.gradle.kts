@@ -56,3 +56,10 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    val media3 = "1.11.1"
+    implementation("androidx.media3:media3-exoplayer:$media3")
+    implementation("androidx.media3:media3-exoplayer-hls:$media3")
+    implementation("androidx.media3:media3-exoplayer-dash:$media3")
+}
