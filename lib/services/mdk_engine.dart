@@ -10,7 +10,7 @@ import '../ui/widgets/premium_player.dart';
 ///
 /// Se usa con los servidores donde FFmpeg, dentro de `media_kit`, se queda clavado al saltar a un
 /// segmento sin cargar. Decodifica AV1 por software con `dav1d` en los iPhone sin hardware para ello.
-class MdkEngine implements PlaybackModel {
+class MdkEngine implements VideoEngine {
   MdkEngine({this.onLog}) {
     loadAppBrightness();
     final decoders = switch (defaultTargetPlatform) {
@@ -30,6 +30,23 @@ class MdkEngine implements PlaybackModel {
 
   final void Function(String)? onLog;
   final _player = mdk.Player();
+
+  @override
+  String get name => 'fvp';
+  @override
+  final ValueNotifier<double> speed = ValueNotifier<double>(1);
+  @override
+  void setSpeed(double value) {
+    speed.value = value;
+    _player.playbackRate = value;
+  }
+
+  @override
+  final ValueNotifier<List<QualityOption>> audioTracks = ValueNotifier<List<QualityOption>>(const []);
+  @override
+  int? get activeAudioTrack => null;
+  @override
+  void selectAudioTrack(int id) {}
   final _positions = StreamController<Duration>.broadcast();
   final _bufferingEvents = StreamController<bool>.broadcast();
   final _errors = StreamController<String>.broadcast();
@@ -40,7 +57,9 @@ class MdkEngine implements PlaybackModel {
   bool _disposed = false;
 
   /// El proxy o el servidor no pudieron abrir el video.
+  @override
   Stream<String> get errors => _errors.stream;
+  @override
   bool get completed => _completed;
 
   /// Relación de aspecto del video, cuando ya se conoce.
@@ -104,7 +123,8 @@ class MdkEngine implements PlaybackModel {
   }
 
   /// Abre [url] en [start], sin pasar por el principio del video.
-  Future<void> open(String url, {Duration start = Duration.zero}) async {
+  @override
+  Future<void> open(String url, {Duration start = Duration.zero, Map<String, String>? headers}) async {
     _completed = false;
     _activeQuality = null;
     _duration = Duration.zero;
@@ -122,9 +142,11 @@ class MdkEngine implements PlaybackModel {
       if (_disposed) return;
       if (result < 0) onLog?.call('[WARN] fvp: no se pudo preparar en ${start.inSeconds}s ($result)');
     }
+    _player.playbackRate = speed.value;
     _player.state = mdk.PlaybackState.playing;
   }
 
+  @override
   void stop() {
     _ticker?.cancel();
     _player.state = mdk.PlaybackState.stopped;
@@ -148,6 +170,7 @@ class MdkEngine implements PlaybackModel {
   }
 
   /// Imagen del video, centrada y sin deformar.
+  @override
   Widget surface() {
     return ValueListenableBuilder<int?>(
       valueListenable: _player.textureId,
@@ -163,6 +186,7 @@ class MdkEngine implements PlaybackModel {
     );
   }
 
+  @override
   void dispose() {
     _disposed = true;
     _ticker?.cancel();
@@ -171,6 +195,8 @@ class MdkEngine implements PlaybackModel {
     _bufferingEvents.close();
     _errors.close();
     playing.dispose();
+    speed.dispose();
+    audioTracks.dispose();
     qualities.dispose();
     aspectRatio.dispose();
   }

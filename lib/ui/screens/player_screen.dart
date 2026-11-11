@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'package:media_kit/media_kit.dart';
@@ -8,6 +9,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:rolostream_core/rolostream_core.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/app_error.dart';
+import '../../services/exo_engine.dart';
 import '../../services/mdk_engine.dart';
 import '../../services/mediaflow_service.dart';
 import '../../services/source_registry.dart';
@@ -44,8 +46,11 @@ class PlayerScreen extends StatefulWidget {
 }
 
 /// Servidores con los que FFmpeg, dentro de `media_kit`, se queda clavado al saltar a un segmento sin
-/// cargar: usan el motor de `fvp`.
+/// cargar: en iOS usan el motor de `fvp`.
 const _mdkHosts = {'zilla', 'byse'};
+
+/// En Android todo se reproduce con ExoPlayer (Media3): `media_kit` falla en demasiados dispositivos.
+bool get _androidUsesExo => defaultTargetPlatform == TargetPlatform.android;
 
 class _PlayerScreenState extends State<PlayerScreen> {
   late final SourcePlugin _source =
@@ -54,10 +59,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late final Player _player = createPremiumPlayer(logLevel: MPVLogLevel.warn);
   late final VideoController _controller = createPremiumController(_player);
 
-  /// Motor alternativo, creado solo si hace falta.
-  MdkEngine? _mdk;
-  String? _mdkUrl;
-  final _mdkActive = ValueNotifier<bool>(false);
+  /// Motor alternativo a `media_kit`, creado solo si hace falta.
+  VideoEngine? _alt;
+  String? _altUrl;
+  Map<String, String>? _altHeaders;
+  final _altActive = ValueNotifier<bool>(false);
 
   /// Posición del motor en uso.
   final _positions = StreamController<Duration>.broadcast();
@@ -65,19 +71,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late final PlaybackWatchdog _watchdog = PlaybackWatchdog.withSource(
     position: _positions.stream,
     shouldWatch: () =>
-        _mdkActive.value ? _engine.playing.value && !_engine.completed : _player.state.playing && !_player.state.completed,
+        _altActive.value ? _engine.playing.value && !_engine.completed : _player.state.playing && !_player.state.completed,
     reopen: (at) async {
       if (_guard.shouldFallBackToStart()) {
         await _openFromStart();
         return;
       }
-      if (_mdkActive.value) {
+      if (_altActive.value) {
         // Si se quedó clavado tras un salto, la posición ya está en el destino.
         final stuck = _engine.position > at ? _engine.position : at;
         final target = stuck > _resume ? stuck : _resume;
         _log.add('[WARN] El video no avanza: se reabre en ${target.inSeconds}s');
         _watchdog.resetPosition();
-        await _engine.open(_mdkUrl!, start: target);
+        await _engine.open(_altUrl!, start: target, headers: _altHeaders);
         return;
       }
       // Si aún no se llegó al punto guardado, `at` es anterior a él.
@@ -106,20 +112,46 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Duration? _unreachedResume;
   bool _durationLogged = false;
 
-  MdkEngine get _engine {
-    final existing = _mdk;
+  VideoEngine get _engine {
+    final existing = _alt;
     if (existing != null) return existing;
-    final engine = MdkEngine(onLog: _log.add);
+    final VideoEngine engine =
+        _androidUsesExo ? ExoEngine(onLog: _log.add) : MdkEngine(onLog: _log.add);
     engine.positionStream.listen((p) {
-      if (_mdkActive.value) _positions.add(p);
+      if (_altActive.value) _positions.add(p);
     });
-    engine.errors.listen(_onMdkError);
-    return _mdk = engine;
+    engine.errors.listen(_onEngineError);
+    return _alt = engine;
   }
 
-  Duration get _currentPosition => _mdkActive.value ? _engine.position : _player.state.position;
-  Duration get _currentDuration => _mdkActive.value ? _engine.duration : _player.state.duration;
-  bool get _isPlaying => _mdkActive.value ? _engine.playing.value : _player.state.playing;
+  Duration get _currentPosition => _altActive.value ? _engine.position : _player.state.position;
+  Duration get _currentDuration => _altActive.value ? _engine.duration : _player.state.duration;
+  bool get _isPlaying => _altActive.value ? _engine.playing.value : _player.state.playing;
+
+  /// Número del episodio siguiente, si existe.
+  final _nextNumero = ValueNotifier<int?>(null);
+
+  Future<void> _findNextEpisode() async {
+    try {
+      final detail = await _source.getAnime(widget.slug);
+      final later = [for (final e in detail.episodios) if (e.numero > widget.numero) e.numero]..sort();
+      if (mounted && later.isNotEmpty) _nextNumero.value = later.first;
+    } catch (_) {
+      // Sin la lista de episodios simplemente no hay botón de "Siguiente".
+    }
+  }
+
+  void _openEpisode(int numero) {
+    Navigator.of(context).pushReplacement(MaterialPageRoute<void>(
+      builder: (_) => PlayerScreen(
+        slug: widget.slug,
+        numero: numero,
+        animeTitulo: widget.animeTitulo,
+        imagen: widget.imagen,
+        sourceId: _source.id,
+      ),
+    ));
+  }
 
   int _av1Errors = 0;
   int _av1ErrorsLogged = 0;
@@ -154,7 +186,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _log.add('$tag mpv ${l.prefix}: ${DebugLog.short(l.text, 220)}');
     });
     _player.stream.position.listen((p) {
-      if (!_mdkActive.value) _positions.add(p);
+      if (!_altActive.value) _positions.add(p);
     });
     // Si el video avanza después de un error, el error era transitorio: quitamos el aviso.
     _positions.stream.listen((pos) {
@@ -171,6 +203,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _positions.stream.listen(_verifyResume);
     _progressTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
     _load();
+    _findNextEpisode();
   }
 
   Future<void> _openFromStart() async {
@@ -186,9 +219,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
             content: Text('Este servidor no pudo retomar donde ibas: empieza desde el inicio. '
                 'Con otro servidor puedes retomarlo.')));
     }
-    if (_mdkActive.value) {
+    if (_altActive.value) {
       _watchdog.resetPosition();
-      await _engine.open(_mdkUrl!);
+      await _engine.open(_altUrl!, headers: _altHeaders);
       return;
     }
     final old = _media!;
@@ -196,9 +229,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     await _player.open(_media!);
   }
 
-  void _onMdkError(String message) {
+  void _onEngineError(String message) {
     _log.add('[PLAYER] ${DebugLog.short(message, 300)}');
-    if (!mounted || !_mdkActive.value) return;
+    if (!mounted || !_altActive.value) return;
     _watchdog.stop();
     setState(() => _playError = message);
   }
@@ -219,7 +252,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (jump != null) {
       _log.add('[WARN] Arrancó en ${position.inSeconds}s en vez de ${jump.inSeconds}s: '
           'se salta (intento ${_guard.seeks})');
-      _mdkActive.value ? _engine.seek(jump) : _player.seek(jump);
+      _altActive.value ? _engine.seek(jump) : _player.seek(jump);
     } else if (_guard.gaveUp) {
       _guard.gaveUp = false;
       _log.add('[WARN] Este servidor no permitió saltar a ${_guard.target.inSeconds}s');
@@ -285,8 +318,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _errorTimer?.cancel();
     _watchdog.dispose();
     _log.dispose();
-    _mdk?.dispose();
-    _mdkActive.dispose();
+    _alt?.dispose();
+    _altActive.dispose();
+    _nextNumero.dispose();
     _positions.close();
     _player.dispose();
     super.dispose();
@@ -486,25 +520,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _log.add('[WARN] el proxy no devolvió mediaflow_proxy_url; se abre directo (puede dar 403)');
       }
 
-      final useMdk = viaProxy && _mdkHosts.contains(video.host);
-      _log.add('[PLAY] ${useMdk ? 'fvp' : 'media_kit'} open${viaProxy ? ' (vía proxy)' : ''}: '
+      final useAlt = _androidUsesExo || (viaProxy && _mdkHosts.contains(video.host));
+      _log.add('[PLAY] ${useAlt ? _engine.name : 'media_kit'} open${viaProxy ? ' (vía proxy)' : ''}: '
           '${DebugLog.short(finalUrl.replaceAll(MediaFlowService.apiPassword, '***'))}');
       final unreached = _unreachedResume;
       if (unreached != null && unreached > _resume) _resume = unreached;
       _unreachedResume = null;
       if (_resume > Duration.zero) _log.add('[INFO] Reanudando en ${_resume.inSeconds}s');
       _durationLogged = false;
-      if (useMdk) {
+      if (useAlt) {
         try {
-          await _openWithMdk(finalUrl);
+          await _openWithAlt(finalUrl, viaProxy ? null : video.headers);
           return;
         } catch (e) {
           // Si el motor no está disponible, `media_kit` al menos reproduce desde donde pueda.
-          _log.add('[WARN] fvp no disponible (${DebugLog.short(e.toString(), 200)}): se usa media_kit');
+          _log.add('[WARN] ${_engine.name} no disponible (${DebugLog.short(e.toString(), 200)}): '
+              'se usa media_kit');
         }
       }
-      _mdk?.stop();
-      _mdkActive.value = false;
+      _alt?.stop();
+      _altActive.value = false;
       _guard = ResumeGuard(_resume);
       _media = Media(
         finalUrl,
@@ -522,16 +557,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  Future<void> _openWithMdk(String url) async {
+  Future<void> _openWithAlt(String url, Map<String, String>? headers) async {
     final engine = _engine;
     await _player.stop();
-    _mdkUrl = url;
-    _mdkActive.value = true;
+    _altUrl = url;
+    _altHeaders = headers;
+    _altActive.value = true;
     // Un salto cae en el fotograma clave anterior, que puede estar varios segundos antes.
     const margin = Duration(seconds: 30);
     _guard = ResumeGuard(_resume > margin ? _resume - margin : Duration.zero);
     _watchdog.begin();
-    await engine.open(url, start: _resume);
+    await engine.open(url, start: _resume, headers: headers);
   }
 
   Widget _videoArea() {
@@ -541,13 +577,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
         fit: StackFit.expand,
         children: [
           ValueListenableBuilder<bool>(
-            valueListenable: _mdkActive,
+            valueListenable: _altActive,
             builder: (context, useMdk, _) => useMdk
-                ? EngineVideoView(
-                    model: _engine,
-                    surface: _engine.surface(),
-                    phase: _watchdog.phase,
-                    connectingLabel: 'Conectando al servidor...',
+                ? ValueListenableBuilder<int?>(
+                    valueListenable: _nextNumero,
+                    builder: (context, next, _) => EngineVideoView(
+                      model: _engine,
+                      surface: _engine.surface(),
+                      phase: _watchdog.phase,
+                      connectingLabel: 'Conectando al servidor...',
+                      title: '${widget.animeTitulo} · ${episodeLabel(widget.numero)}',
+                      onNext: next == null ? null : () => _openEpisode(next),
+                    ),
                   )
                 : PremiumVideo(
                     player: _player,

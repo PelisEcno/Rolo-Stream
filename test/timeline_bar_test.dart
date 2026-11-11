@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:video_player/video_player.dart' show VideoFormat;
+import 'package:rolostream/services/exo_engine.dart';
 import 'package:rolostream/ui/theme/app_theme.dart';
 import 'package:rolostream/ui/widgets/engine_video.dart';
 import 'package:rolostream/ui/widgets/premium_player.dart';
@@ -47,6 +49,17 @@ class FakeModel implements PlaybackModel {
   @override
   void selectQuality(int id) => selected.add(id);
   @override
+  final ValueNotifier<double> speed = ValueNotifier<double>(1);
+  @override
+  void setSpeed(double value) => speed.value = value;
+  @override
+  final ValueNotifier<List<QualityOption>> audioTracks = ValueNotifier<List<QualityOption>>(const []);
+  @override
+  int? activeAudioTrack;
+  final selectedAudio = <int>[];
+  @override
+  void selectAudioTrack(int id) => selectedAudio.add(id);
+  @override
   void play() {
     plays++;
     playing.value = true;
@@ -72,6 +85,23 @@ void main() {
   setUp(() {
     model = FakeModel();
     phase.value = PlaybackPhase.playing;
+  });
+
+  group('ExoPlayer: formato del stream', () {
+    test('HLS por extensión o por la ruta del proxy', () {
+      expect(exoFormatFor('https://cdn/x/master.m3u8?t=1'), VideoFormat.hls);
+      expect(exoFormatFor('http://127.0.0.1:8888/proxy/hls/manifest.m3u8?d=x'), VideoFormat.hls);
+    });
+
+    test('DASH y archivos normales', () {
+      expect(exoFormatFor('https://cdn/x/stream.mpd'), VideoFormat.dash);
+      expect(exoFormatFor('http://127.0.0.1:8888/proxy/stream?d=https%3A%2F%2Fa%2Fv.mp4'), isNull);
+      expect(exoFormatFor('https://cdn/video.mp4'), isNull);
+    });
+
+    test('la URL de destino dentro de la consulta no confunde la detección', () {
+      expect(exoFormatFor('http://127.0.0.1:8888/proxy/stream?d=https%3A%2F%2Fa%2Fmaster.m3u8'), isNull);
+    });
   });
 
   group('TimelineBar', () {
@@ -147,7 +177,8 @@ void main() {
   });
 
   group('EngineVideoView', () {
-    Widget view() => MaterialApp(
+    var nexts = 0;
+    Widget view({bool withNext = false}) => MaterialApp(
           theme: AppTheme.dark,
           home: Scaffold(
             body: Center(
@@ -159,6 +190,8 @@ void main() {
                   surface: const SizedBox.expand(),
                   phase: phase,
                   connectingLabel: 'Conectando al servidor...',
+                  title: 'Dragon Ball Super · E2',
+                  onNext: withNext ? () => nexts++ : null,
                 ),
               ),
             ),
@@ -298,6 +331,53 @@ void main() {
       await finish(tester);
     });
 
+    testWidgets('los botones de ±10 s saltan desde la posición actual', (tester) async {
+      await tester.pumpWidget(view());
+      await tester.tap(find.byTooltip('Adelantar 10 segundos'));
+      await tester.pump();
+      expect(model.seeks.last, const Duration(seconds: 110));
+      await tester.tap(find.byTooltip('Retroceder 10 segundos'));
+      await tester.pump();
+      expect(model.seeks.last, const Duration(seconds: 100));
+      await finish(tester);
+    });
+
+    testWidgets('la velocidad se elige en una hoja y queda marcada', (tester) async {
+      await tester.pumpWidget(view());
+      await tester.tap(find.byTooltip('Velocidad'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      await tester.tap(find.text('1.5x'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(model.speed.value, 1.5);
+      await finish(tester);
+    });
+
+    testWidgets('siguiente episodio solo aparece si hay uno', (tester) async {
+      await tester.pumpWidget(view());
+      expect(find.byTooltip('Siguiente episodio'), findsNothing);
+
+      nexts = 0;
+      await tester.pumpWidget(view(withNext: true));
+      await tester.tap(find.byTooltip('Siguiente episodio'));
+      await tester.pump();
+      expect(nexts, 1);
+      await finish(tester);
+    });
+
+    testWidgets('el audio solo aparece con más de una pista', (tester) async {
+      await tester.pumpWidget(view());
+      expect(find.byTooltip('Audio'), findsNothing);
+
+      model.audioTracks.value = const [QualityOption(0, 'Japonés'), QualityOption(1, 'Español')];
+      await tester.pump();
+      await tester.tap(find.byTooltip('Audio'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      await tester.tap(find.text('Español'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(model.selectedAudio, [1]);
+      await finish(tester);
+    });
+
     testWidgets('el botón de calidad solo aparece con varias y deja elegir', (tester) async {
       await tester.pumpWidget(view());
       expect(find.byTooltip('Calidad'), findsNothing);
@@ -326,6 +406,8 @@ void main() {
       await settle();
       expect(find.byTooltip('Salir de pantalla completa'), findsOneWidget);
       expect(find.text('ROLOSTREAM'), findsWidgets);
+      expect(find.text('Dragon Ball Super · E2'), findsOneWidget);
+      expect(find.text('Velocidad (1x)'), findsOneWidget);
       expect(tester.takeException(), isNull);
 
       await tester.tap(find.byTooltip('Salir de pantalla completa'));
