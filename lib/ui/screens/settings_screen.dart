@@ -6,6 +6,7 @@ import '../../services/profile_service.dart';
 import '../../services/source_registry.dart';
 import '../widgets/profile_avatar.dart';
 import '../widgets/source_picker.dart';
+import 'about_screen.dart';
 import 'iptv_manager_screen.dart';
 import '../theme/app_theme.dart';
 
@@ -106,13 +107,9 @@ class SettingsScreen extends StatelessWidget {
           ),
           const Divider(height: 1),
           _tile(Icons.info_outline_rounded, 'Acerca de',
-              subtitle: 'Versión 0.1.0',
-              onTap: () => showAboutDialog(
-                    context: context,
-                    applicationName: 'RoloStream',
-                    applicationVersion: '0.1.0',
-                    applicationLegalese: 'Reproductor de anime multiplataforma.',
-                  )),
+              subtitle: 'Versión $appVersion · Colabora en GitHub',
+              onTap: () => Navigator.push(
+                  context, MaterialPageRoute(builder: (_) => const AboutScreen()))),
           if (!AuthService.instance.isLocal) ...[
             const Divider(height: 1),
             _tile(Icons.logout_rounded, 'Cerrar sesión', onTap: () => _signOut(context)),
